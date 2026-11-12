@@ -70,6 +70,18 @@ test("quotaRows takes a reused reading's own time, not the report's", () => {
   assert.equal(quotaRows(ran(report))[0].readAt, NOW - 10 * MIN);
 });
 
+test("quotaRows doesn't date a stale reading without its time as new", () => {
+  // Plain `quota-axi --json` drops state.refreshedAt unless the reading was reused, so a
+  // cached fallback after a failed read arrives as stale with no time of its own.
+  const report = structuredClone(quota);
+  report.providers[0].state = { status: "stale", stale: true };
+  const [claude] = quotaRows(ran(report));
+  assert.equal(claude.readAt, null);
+  assert.deepEqual(claude.weekly, { left: 38, resetAt: Date.parse("2026-11-13T19:00:00Z") });
+  assert.equal(age(claude, NOW), "old");
+  assert.match(tip(claude, NOW), /Read at an unknown time\.$/);
+});
+
 test("quotaRows says unavailable, with the reason, instead of guessing", () => {
   const reasons = (/** @type {import("../mods/herdr-token-viewer/usage.js").Ran} */ r) => quotaRows(r).map((row) => row.reason);
   assert.deepEqual(reasons(null), ["quota-axi could not be run", "quota-axi could not be run"]);
@@ -119,12 +131,26 @@ test("codexRows goes by each window's length, not its position", () => {
   assert.equal(codexRows(ran({ accounts: [odd] }))[0].reason, "no 5-hour or weekly window reported");
 });
 
-test("codexRows says unavailable for an account without a good reading, and when the program fails", () => {
-  const rows = codexRows(ran({ accounts: [account(0, { quota: undefined }), account(1, { quota: { status: 401 }, enabled: false })] }));
-  assert.equal(rows[0].reason, "no reading yet");
-  assert.equal(rows[1].reason, "the last read failed (status 401)");
+test("codexRows shows a rate-limited account's windows", () => {
+  // codex-multi-auth caches a 429 answer with its quota headers and lists it as rate-limited.
+  const exhausted = account(1, { quota: {
+    updatedAt: NOW - 5 * MIN, status: 429, planType: "team",
+    primary: { usedPercent: 40, windowMinutes: 300, resetAtMs: NOW + HOUR },
+    secondary: { usedPercent: 100, windowMinutes: 10080, resetAtMs: NOW + 50 * HOUR },
+  } });
+  const [row] = codexRows(ran({ accounts: [exhausted] }));
+  assert.equal(row.reason, undefined);
+  assert.deepEqual(row.fiveHour, { left: 60, resetAt: NOW + HOUR });
+  assert.deepEqual(row.weekly, { left: 0, resetAt: NOW + 50 * HOUR });
+  assert.deepEqual(tightest(row, NOW), { text: "0%", level: "low" });
+});
+
+test("codexRows says unavailable for an account without a reading, and when the program fails", () => {
+  const rows = codexRows(ran({ accounts: [account(0), account(1, { quota: undefined, enabled: false })] }));
+  assert.equal(rows[1].reason, "no reading yet");
   assert.equal(rows[1].enabled, false);
   assert.equal(rows[1].name, "Codex 2");
+  assert.equal(age(rows[1], NOW), null);
 
   assert.deepEqual(codexRows(null), [unavailable("codex", "Codex", "codex-multi-auth could not be run")]);
   assert.deepEqual(codexRows({ code: 1, stdout: "" }), [unavailable("codex", "Codex", "codex-multi-auth failed (exit 1)")]);
@@ -168,7 +194,8 @@ test("age speaks up only once a reading is older than a refresh", () => {
   assert.equal(age({ ...row, readAt: NOW - STALE_MS }, NOW), "3m");
   assert.equal(age({ ...row, readAt: NOW - 7 * HOUR - 59 * MIN }, NOW), "7h");
   assert.equal(age({ ...row, readAt: NOW - 49 * HOUR }, NOW), "2d");
-  assert.equal(age({ ...row, readAt: null }, NOW), null);
+  assert.equal(age({ ...row, readAt: null }, NOW), "old");
+  assert.equal(age(pendingRows().codex[0], NOW), null);
 });
 
 test("tightest picks the smaller share for the folded sidebar", () => {

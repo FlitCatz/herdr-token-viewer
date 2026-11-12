@@ -19,7 +19,8 @@ codex-multi-auth rotates, with a dot on the one in use.
   order), `Gemini`.
   - Left: the name (`foreground`; `muted` for a disabled account or a row without a
     reading), then a 5 px round `accent` dot on the Codex account in use, then the
-    reading's age (10.5 px, `dim`) once it is 3 minutes old or more: `46m`, `7h`, `2d`.
+    reading's age (10.5 px, `dim`) once it is 3 minutes old or more: `46m`, `7h`, `2d`;
+    `old` when the reading's time isn't known.
   - Two cells, 68 px each: the share left (`84%`, 11.5 px, medium) at the left, the time to
     the reset (10.5 px, `dim`) at the right, and under them a 2 px bar: track `border`,
     filled to the share left.
@@ -41,7 +42,6 @@ codex-multi-auth rotates, with a dot on the one in use.
 - On start and every 120 s it runs the two programs, each on its own so the fast one shows
   first, off the UI thread, 30 s timeout each. A read still in flight isn't started twice.
   Every 60 s it redraws so countdowns and ages move.
-- Click the heading: read now. While a read is in flight the heading says `Usage…`.
 - Each read replaces its rows. A failed read shows `unavailable`; an earlier reading is
   never kept to stand in for it.
 - Hover a row: a tooltip with the whole reading in one line, for example
@@ -49,14 +49,13 @@ codex-multi-auth rotates, with a dot on the one in use.
   A Codex row starts with the account's masked label as codex-multi-auth prints it, then
   `in use` and `disabled` where they apply. Reset times are this machine's local time.
   Without a reading: `Gemini: unavailable, sign-in needed.`
-- Hover the heading: `Remaining usage per 5-hour and weekly window, with the time to each reset. Click to read again.`
+- Hover the heading: `Remaining usage per 5-hour and weekly window, with the time to each reset.`
 - Why a row is unavailable: the program couldn't be run (`quota-axi could not be run`),
   exited non-zero without a readable report (`... failed (exit 3)`), printed nothing
   readable (`... printed no reading`); quota-axi lists the provider as not set up or
   leaves it out (`not set up on this Mac`), or gives a state other than `fresh` or `stale`
   (`sign-in needed`, `rate limited, try later`, `the read failed`, `no reading available`);
-  a Codex account has no saved reading (`no reading yet`) or its last one failed
-  (`the last read failed (status 401)`); neither window is reported
+  a Codex account has no saved reading (`no reading yet`); neither window is reported
   (`no 5-hour or weekly window reported`); codex-multi-auth lists no accounts.
 
 ## Built from
@@ -71,12 +70,15 @@ codex-multi-auth rotates, with a dot on the one in use.
   - `quota-axi --provider claude,agy --json --no-credential-refresh --max-age 60s`. From
     `providers[]`: `claude` windows `five_hour` and `seven_day`, `agy` windows `gemini_5h`
     and `gemini_weekly`; each window's `percentRemaining` and `resetsAt`; `plan`;
-    `state.status`; the reading's time is `state.refreshedAt`, else the report's
-    `generatedAt`. Other windows (per-model ones) are ignored.
+    `state.status`; the reading's time is `state.refreshedAt`, else for a `fresh` reading
+    the report's `generatedAt`. Plain `--json` drops `refreshedAt` unless the reading was
+    reused, so a `stale` reading without it is of unknown time and shows `old`. Other
+    windows (per-model ones) are ignored.
   - `codex-multi-auth limits --json`. From `accounts[]`: `index`, `label`, `current`,
-    `enabled`, and `quota`: `status` (200 is good), `planType`, `updatedAt`, and in
-    `primary` / `secondary` the window with `windowMinutes` 300 (5-hour) and 10080
-    (weekly): `usedPercent` (shown as 100 minus it) and `resetAtMs`.
+    `enabled`, and `quota`: `planType`, `updatedAt`, and in `primary` / `secondary` the
+    window with `windowMinutes` 300 (5-hour) and 10080 (weekly): `usedPercent` (shown as
+    100 minus it) and `resetAtMs`. Read the windows whatever `status` says: a 429 entry
+    is a rate-limited account with real windows, often an exhausted one.
 - `herdr`: `exec()`, `theme()`. gpui-kit: `cx.timer.every`, `cx.spawn`, `.tooltip()`,
   `.on_size_change()` (its own width decides rail or full), `h_flex` / `v_flex` from
   gpui-base.

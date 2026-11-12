@@ -127,8 +127,9 @@ export function quotaRows(ran) {
     const fiveHour = win(r.fiveHour);
     const weekly = win(r.weekly);
     if (!fiveHour && !weekly) return unavailable(r.id, r.name, "no 5-hour or weekly window reported");
-    // A reused or stale reading says when it was taken; a new one was taken just now.
-    const readAt = time(p.state?.refreshedAt) ?? generatedAt;
+    // A reused reading says when it was taken; a fresh one was taken just now. A stale one
+    // without its time is of unknown age, not new.
+    const readAt = time(p.state?.refreshedAt) ?? (status === "fresh" ? generatedAt : null);
     return { id: r.id, name: r.name, fiveHour, weekly, readAt, plan: typeof p.plan === "string" ? p.plan : undefined };
   });
 }
@@ -152,10 +153,7 @@ export function codexRows(ran) {
     const name = `Codex ${index + 1}`;
     const about = { label, current: a?.current === true, enabled: a?.enabled !== false };
     const q = a?.quota;
-    const status = num(q?.status);
-    if (!q || (status !== null && status !== 200)) {
-      return { ...unavailable(id, name, status === null ? "no reading yet" : `the last read failed (status ${status})`), ...about };
-    }
+    if (!q) return { ...unavailable(id, name, "no reading yet"), ...about };
     /** @type {(minutes: number) => Win | null} */
     const win = (minutes) => {
       const w = [q.primary, q.secondary].find((x) => num(x?.windowMinutes) === minutes);
@@ -216,12 +214,14 @@ export function cell(win, now) {
 
 /**
  * The reading's age, when it is old enough to say, else null. It sits beside the name, so
- * it is one unit only: `46m`, `7h`, `2d`.
+ * it is one unit only: `46m`, `7h`, `2d`, or `old` for a reading of unknown time.
  * @param {Row} row
  * @param {number} now
  */
 export function age(row, now) {
-  if (row.readAt === null || now - row.readAt < STALE_MS) return null;
+  if (row.pending || row.reason) return null;
+  if (row.readAt === null) return "old";
+  if (now - row.readAt < STALE_MS) return null;
   const m = Math.floor((now - row.readAt) / 60000);
   if (m < 60) return `${m}m`;
   return m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`;
@@ -267,6 +267,6 @@ export function tip(row, now) {
     if (passed(win, now)) return `${title}: reset ${clock(win.resetAt)}, after this reading`;
     return `${title}: ${Math.round(win.left)}% left` + (win.resetAt === null ? "" : `, resets ${clock(win.resetAt)}`);
   };
-  const read = row.readAt === null ? "" : ` Read ${span(now - row.readAt)} ago.`;
+  const read = row.readAt === null ? " Read at an unknown time." : ` Read ${span(now - row.readAt)} ago.`;
   return `${who}. ${part("5-hour", row.fiveHour)}. ${part("Weekly", row.weekly)}.${read}`;
 }

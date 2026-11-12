@@ -14,14 +14,15 @@ account that [codex-multi-auth](https://github.com/ndycode/codex-multi-auth) rot
 - Each window shows the share **left** (`84%`), the time to its reset (`3h40m`, `1d17h`)
   and a thin bar. The number turns the theme's `working` color under 25% and its
   `blocked` color under 10%.
-- A reading older than 3 minutes shows its age beside the name (`46m`, `7h`).
-  codex-multi-auth's numbers are the ones it last saw, so Codex rows usually have one.
+- A reading older than 3 minutes shows its age beside the name (`46m`, `7h`), and one
+  whose time isn't known shows `old`. codex-multi-auth's numbers are the ones it last
+  saw, so Codex rows usually have one.
 - A window that reset after its reading shows `–` and `reset` instead of an outdated share.
 - A provider or account with no reading says `unavailable`; the tooltip says why
   (not set up, sign-in needed, the program is missing, ...). Nothing is guessed.
 - Hover a row for the details: plan, exact reset times, the age of the reading and, for
   Codex, the account's masked label.
-- It reads again every 2 minutes. Click the `Usage` heading to read now.
+- It reads again every 2 minutes.
 - With the sidebar folded to its rail, each row is one number: the smaller of its two shares.
 
 ### Where the numbers come from

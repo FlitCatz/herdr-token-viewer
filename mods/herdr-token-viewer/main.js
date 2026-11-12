@@ -19,7 +19,7 @@ const EXEC_TIMEOUT_MS = 30000;
 const SOURCES = {
   quota: {
     command: QUOTA_AXI,
-    // --max-age lets several windows (or a click right after a tick) share one vendor read.
+    // --max-age lets several windows share one vendor read.
     args: ["--provider", "claude,agy", "--json", "--no-credential-refresh", "--max-age", "60s"],
     rows: quotaRows,
   },
@@ -67,7 +67,6 @@ export default class TokenViewer extends View {
         cx.notify();
       });
     }
-    cx.notify();
   }
 
   /**
@@ -141,10 +140,8 @@ export default class TokenViewer extends View {
         cx.notify();
       })
       .when(!rail, (el) => el.child(h_flex().id("usage-head").px(PAD).h(36).pt(12).pb(4).flex_none().gap(GAP).items_center()
-        .cursor_pointer()
-        .tooltip("Remaining usage per 5-hour and weekly window, with the time to each reset. Click to read again.")
-        .on_click((_e, cx) => this.refresh(cx))
-        .child(div().flex_1().text_size(11.5).font_medium().text_color(t.dim).child(this.reading.size ? "Usage…" : "Usage"))
+        .tooltip("Remaining usage per 5-hour and weekly window, with the time to each reset.")
+        .child(div().flex_1().text_size(11.5).font_medium().text_color(t.dim).child("Usage"))
         .child(head("5h"))
         .child(head("Week"))))
       .child(v_flex().id("usage-rows").flex_1().min_h(0).px(rail ? 0 : PAD).pt(rail ? 6 : 0).overflow_y_scrollbar()
