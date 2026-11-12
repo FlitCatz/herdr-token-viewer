@@ -12,8 +12,9 @@ Fable and Argon have limits of their own, so each has a row too.
 
 - One row each for Claude and Gemini, and one for every Codex account (`Codex 1`,
   `Codex 2`, ...). The account Codex is using now has a small dot.
-- `Fable` (under Claude) and `Argon` (under Gemini) show their separate weekly limit.
-  They have no 5-hour window, so their 5h column stays `–`.
+- `Fable` (under Claude) and `Argon` (under Gemini) show their separate limit. Fable's
+  is weekly only, so its 5h column stays `–`. Argon's 5h column shows a share only when a
+  5-hour Argon reading is reported; otherwise it stays `–` with an empty bar.
 - Each window shows the share **left** (`84%`), the time to its reset (`3h40m`, `1d17h`)
   and a thin bar. The number turns the theme's `working` color under 25% and its
   `blocked` color under 10%.

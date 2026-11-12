@@ -50,7 +50,7 @@ const account = (index, over = {}) => ({
 });
 const limits = { schemaVersion: 1, generatedAt: NOW, mode: "cached", accounts: [account(0), account(1), account(2, { current: true })] };
 
-test("quotaRows reads Claude and Gemini's 5-hour and weekly windows, and Fable and Argon's weekly ones", () => {
+test("quotaRows reads Claude and Gemini's 5-hour and weekly windows, and Fable and Argon's own ones", () => {
   const [claude, fable, gemini, argon] = quotaRows(ran(quota));
   assert.deepEqual(claude, {
     id: "claude", name: "Claude", plan: "max", readAt: NOW,
@@ -120,7 +120,7 @@ test("quotaRows shows Fable or Argon as unavailable when its window is missing f
   report.providers[1].windows = report.providers[1].windows.filter((w) => w.id !== "gemini_argon_weekly");
   const rows = quotaRows(ran(report));
   assert.deepEqual(rows[1], unavailable("fable", "Fable", "no weekly window reported"));
-  assert.deepEqual(rows[3], unavailable("argon", "Argon", "no weekly window reported"));
+  assert.deepEqual(rows[3], unavailable("argon", "Argon", "no 5-hour or weekly window reported"));
   // Claude and Gemini keep their own numbers.
   assert.equal(rows[0].weekly?.left, 38);
   assert.equal(rows[2].weekly?.left, 95);
@@ -231,6 +231,27 @@ test("tightest picks the smaller share for the folded sidebar", () => {
   // The weekly window reset since the reading, so only the 5-hour one still counts.
   assert.deepEqual(tightest({ ...row, weekly: { left: 5, resetAt: NOW + HOUR } }, NOW + 2 * HOUR), { text: "88%", level: "ok" });
   assert.deepEqual(tightest(unavailable("codex", "Codex", "x"), NOW), { text: "–", level: "none" });
+});
+
+test("quotaRows reads Argon's own 5-hour window when quota-axi reports it", () => {
+  const report = structuredClone(quota);
+  report.providers[1].windows.push({ id: "gemini_argon_5h", kind: "session", percentRemaining: 21, resetsAt: "2026-11-12T04:15:00.000Z" });
+  const argon = quotaRows(ran(report))[3];
+  assert.deepEqual(argon.fiveHour, { left: 21, resetAt: Date.parse("2026-11-12T04:15:00Z") });
+  assert.deepEqual(argon.weekly, { left: 42, resetAt: Date.parse("2026-11-16T00:50:05Z") });
+  // The folded rail shows the tighter of the two: here the 5-hour share, not the weekly 42%.
+  assert.deepEqual(tightest(argon, NOW), { text: "21%", level: "warn" });
+  assert.match(tip(argon, NOW), /^Argon\. 5-hour: 21% left, resets .*\. Weekly: 42% left, resets /);
+  // Gemini's own windows aren't taken for Argon's, nor Argon's for Gemini's.
+  assert.deepEqual(quotaRows(ran(report))[2].fiveHour, { left: 98, resetAt: Date.parse("2026-11-12T06:00:00Z") });
+});
+
+test("quotaRows leaves Argon's 5-hour cell empty when only its weekly window is reported", () => {
+  const argon = quotaRows(ran(quota))[3];
+  assert.equal(argon.fiveHour, null);
+  assert.deepEqual(argon.weekly, { left: 42, resetAt: Date.parse("2026-11-16T00:50:05Z") });
+  assert.deepEqual(tightest(argon, NOW), { text: "42%", level: "ok" });
+  assert.match(tip(argon, NOW), /^Argon\. 5-hour: not reported\. Weekly: 42% left, resets /);
 });
 
 test("a weekly-only row folds to its weekly share and says the 5-hour window isn't reported", () => {

@@ -4,7 +4,8 @@ A short list in the left sidebar, below Agents and above Settings, that says how
 Claude, Codex and Gemini usage is left: for each, the share left of the 5-hour window and
 of the weekly window, and the time until each resets. Codex has one row per account that
 codex-multi-auth rotates, with a dot on the one in use. Fable (Claude) and Argon (Gemini)
-have a weekly limit of their own and a row each, with only the weekly window.
+have a limit of their own and a row each: Fable's is weekly only; Argon's 5-hour window
+shows only when one is reported.
 
 ![Usage](preview.png)
 
@@ -17,8 +18,9 @@ have a weekly limit of their own and a row each, with only the weekly window.
   heads `5h` and `Week` (10.5 px, `dim`), each 68 px wide with 6 px between, over their
   columns.
 - Rows, 26 px each, in this order: `Claude`, `Fable`, `Codex 1` ... `Codex n`
-  (codex-multi-auth's order), `Gemini`, `Argon`. `Fable` and `Argon` have no 5-hour
-  window: their 5h cell is `–` with an empty bar, and their week cell is the usual one.
+  (codex-multi-auth's order), `Gemini`, `Argon`. `Fable` has no 5-hour window: its 5h
+  cell is `–` with an empty bar, and its week cell is the usual one. `Argon`'s 5h cell is
+  the usual one when a 5-hour Argon reading is reported, else `–` with an empty bar.
   - Left: the name (`foreground`; `muted` for a disabled account or a row without a
     reading), then a 5 px round `accent` dot on the Codex account in use, then the
     reading's age (10.5 px, `dim`) once it is 3 minutes old or more: `46m`, `7h`, `2d`;
@@ -49,7 +51,7 @@ have a weekly limit of their own and a row each, with only the weekly window.
   never kept to stand in for it.
 - Hover a row: a tooltip with the whole reading in one line, for example
   `Claude, max plan. 5-hour: 84% left, resets Thu 14:10. Weekly: 38% left, resets Sat 04:00. Read <1m ago.`
-  A `Fable` or `Argon` row says `5-hour: not reported`.
+  A `Fable` row, and an `Argon` row without a 5-hour reading, says `5-hour: not reported`.
   A Codex row starts with the account's masked label as codex-multi-auth prints it, then
   `in use` and `disabled` where they apply. Reset times are this machine's local time.
   Without a reading: `Gemini: unavailable, sign-in needed.`
@@ -60,8 +62,8 @@ have a weekly limit of their own and a row each, with only the weekly window.
   leaves it out (`not set up on this Mac`), or gives a state other than `fresh` or `stale`
   (`sign-in needed`, `rate limited, try later`, `the read failed`, `no reading available`);
   a Codex account has no saved reading (`no reading yet`); neither window is reported
-  (`no 5-hour or weekly window reported`); the provider's reading lacks the Fable or
-  Argon window (`no weekly window reported`); codex-multi-auth lists no accounts.
+  (`no 5-hour or weekly window reported`, Argon included); the provider's reading lacks
+  the Fable window (`no weekly window reported`); codex-multi-auth lists no accounts.
 
 ## Built from
 
@@ -75,8 +77,8 @@ have a weekly limit of their own and a row each, with only the weekly window.
   - `quota-axi --provider claude,agy --json --no-credential-refresh --max-age 60s`. From
     `providers[]`: `claude` windows `five_hour` and `seven_day` (Claude) and `model:fable`
     (Fable, weekly only), `agy` windows `gemini_5h` and `gemini_weekly` (Gemini) and
-    `gemini_argon_weekly` (Argon, weekly only); each window's `percentRemaining` and `resetsAt`; `plan`;
-    `state.status`; the reading's time is `state.refreshedAt`, else for a `fresh` reading
+    `gemini_argon_5h` (when reported) and `gemini_argon_weekly` (Argon); each window's
+    `percentRemaining` and `resetsAt`; `plan`; `state.status`; the reading's time is `state.refreshedAt`, else for a `fresh` reading
     the report's `generatedAt`. Plain `--json` drops `refreshedAt` unless the reading was
     reused, so a `stale` reading without it is of unknown time and shows `old`. Other
     windows (agy's `claude_gpt_*` ones, for example) are ignored.
@@ -122,10 +124,12 @@ have a weekly limit of their own and a row each, with only the weekly window.
   rules, and `tsc -p mods/herdr-token-viewer/jsconfig.json` is clean.
 - With the block in the sidebar, within a few seconds of start the list shows `Claude`,
   `Fable`, one `Codex n` row per codex-multi-auth account, `Gemini` and `Argon`, between
-  the Agents list and Settings. Every row but Fable and Argon has two shares, two reset
-  times and two bars; those two have a `–` 5h cell and a weekly share, reset time and bar.
+  the Agents list and Settings. Every row but Fable has two shares, two reset times and
+  two bars; Fable has a `–` 5h cell and a weekly share, reset time and bar, and so does
+  Argon when quota-axi reports no `gemini_argon_5h`.
 - With quota-axi's reading lacking `model:fable`, the Fable row says `unavailable` while
-  Claude still shows numbers; likewise Argon and `gemini_argon_weekly`.
+  Claude still shows numbers; likewise Argon when it lacks both `gemini_argon_5h` and
+  `gemini_argon_weekly`.
 - A share under 25% is in the `working` color, under 10% in `blocked`, bar included.
 - The Codex account codex-multi-auth marks `current` has the dot; a Codex row read 46
   minutes ago shows `46m` beside its name.

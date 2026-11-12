@@ -30,13 +30,14 @@ const FIVE_HOURS_MIN = 300;
 const WEEK_MIN = 10080;
 
 // Which quota-axi provider and window ids make each row, in display order. quota-axi lists
-// more windows; only these are shown. Fable and Argon have their own weekly limit apart
-// from their provider's plain windows, so their rows have no 5-hour window.
+// more windows; only these are shown. Fable and Argon have their own limit apart from
+// their provider's plain windows. Fable's is weekly only; Argon's 5h cell fills only when
+// quota-axi reports gemini_argon_5h.
 const QUOTA_ROWS = [
   { id: "claude", name: "Claude", provider: "claude", fiveHour: "five_hour", weekly: "seven_day" },
   { id: "fable", name: "Fable", provider: "claude", fiveHour: null, weekly: "model:fable" },
   { id: "gemini", name: "Gemini", provider: "agy", fiveHour: "gemini_5h", weekly: "gemini_weekly" },
-  { id: "argon", name: "Argon", provider: "agy", fiveHour: null, weekly: "gemini_argon_weekly" },
+  { id: "argon", name: "Argon", provider: "agy", fiveHour: "gemini_argon_5h", weekly: "gemini_argon_weekly" },
 ];
 
 // quota-axi's own words for a provider it couldn't read, said the way the tooltip says them.
