@@ -50,8 +50,8 @@ const account = (index, over = {}) => ({
 });
 const limits = { schemaVersion: 1, generatedAt: NOW, mode: "cached", accounts: [account(0), account(1), account(2, { current: true })] };
 
-test("quotaRows reads Claude and Gemini's 5-hour and weekly windows, skipping the per-model ones", () => {
-  const [claude, gemini] = quotaRows(ran(quota));
+test("quotaRows reads Claude and Gemini's 5-hour and weekly windows, and Fable and Argon's own ones", () => {
+  const [claude, fable, gemini, argon] = quotaRows(ran(quota));
   assert.deepEqual(claude, {
     id: "claude", name: "Claude", plan: "max", readAt: NOW,
     fiveHour: { left: 84, resetAt: Date.parse("2026-11-12T05:10:00.381Z") },
@@ -62,6 +62,16 @@ test("quotaRows reads Claude and Gemini's 5-hour and weekly windows, skipping th
     fiveHour: { left: 98, resetAt: Date.parse("2026-11-12T06:00:00Z") },
     weekly: { left: 95, resetAt: Date.parse("2026-11-16T02:30:00Z") },
   });
+  assert.deepEqual(fable, {
+    id: "fable", name: "Fable", plan: "max", readAt: NOW, fiveHour: null,
+    weekly: { left: 77, resetAt: Date.parse("2026-11-13T19:00:00Z") },
+  });
+  assert.deepEqual(argon, {
+    id: "argon", name: "Argon", plan: undefined, readAt: NOW, fiveHour: null,
+    weekly: { left: 42, resetAt: Date.parse("2026-11-16T00:50:05Z") },
+  });
+  // No other window makes a row: not agy's claude_gpt ones, not a model window that isn't Fable.
+  assert.equal(quotaRows(ran(quota)).length, 4);
 });
 
 test("quotaRows takes a reused reading's own time, not the report's", () => {
@@ -84,9 +94,9 @@ test("quotaRows doesn't date a stale reading without its time as new", () => {
 
 test("quotaRows says unavailable, with the reason, instead of guessing", () => {
   const reasons = (/** @type {import("../mods/herdr-token-viewer/usage.js").Ran} */ r) => quotaRows(r).map((row) => row.reason);
-  assert.deepEqual(reasons(null), ["quota-axi could not be run", "quota-axi could not be run"]);
-  assert.deepEqual(reasons({ code: 0, stdout: "" }), ["quota-axi printed no reading", "quota-axi printed no reading"]);
-  assert.deepEqual(reasons({ code: 2, stdout: "boom" }), ["quota-axi failed (exit 2)", "quota-axi failed (exit 2)"]);
+  assert.deepEqual(reasons(null), Array(4).fill("quota-axi could not be run"));
+  assert.deepEqual(reasons({ code: 0, stdout: "" }), Array(4).fill("quota-axi printed no reading"));
+  assert.deepEqual(reasons({ code: 2, stdout: "boom" }), Array(4).fill("quota-axi failed (exit 2)"));
 
   const report = structuredClone(quota);
   report.providers[0].state = { status: "auth_required", stale: false };
@@ -94,10 +104,26 @@ test("quotaRows says unavailable, with the reason, instead of guessing", () => {
   // A valid report is read even when the program exits non-zero for a provider it couldn't read.
   const rows = quotaRows(ran(report, 1));
   assert.deepEqual(rows[0], unavailable("claude", "Claude", "sign-in needed"));
-  assert.deepEqual(rows[1], unavailable("gemini", "Gemini", "not set up on this Mac"));
+  assert.deepEqual(rows[1], unavailable("fable", "Fable", "sign-in needed"));
+  assert.deepEqual(rows[2], unavailable("gemini", "Gemini", "not set up on this Mac"));
+  assert.deepEqual(rows[3], unavailable("argon", "Argon", "not set up on this Mac"));
 
   report.providers = [{ provider: "claude", state: { status: "fresh", stale: false }, windows: [{ id: "model:fable", percentRemaining: 77 }] }];
-  assert.deepEqual(reasons(ran(report)), ["no 5-hour or weekly window reported", "not set up on this Mac"]);
+  assert.deepEqual(reasons(ran(report)), [
+    "no 5-hour or weekly window reported", undefined, "not set up on this Mac", "not set up on this Mac",
+  ]);
+});
+
+test("quotaRows shows Fable or Argon as unavailable when its window is missing from the reading", () => {
+  const report = structuredClone(quota);
+  report.providers[0].windows = report.providers[0].windows.filter((w) => w.id !== "model:fable");
+  report.providers[1].windows = report.providers[1].windows.filter((w) => w.id !== "gemini_argon_weekly");
+  const rows = quotaRows(ran(report));
+  assert.deepEqual(rows[1], unavailable("fable", "Fable", "no weekly window reported"));
+  assert.deepEqual(rows[3], unavailable("argon", "Argon", "no 5-hour or weekly window reported"));
+  // Claude and Gemini keep their own numbers.
+  assert.equal(rows[0].weekly?.left, 38);
+  assert.equal(rows[2].weekly?.left, 95);
 });
 
 test("quotaRows keeps the window it has when the other is missing", () => {
@@ -207,6 +233,33 @@ test("tightest picks the smaller share for the folded sidebar", () => {
   assert.deepEqual(tightest(unavailable("codex", "Codex", "x"), NOW), { text: "–", level: "none" });
 });
 
+test("quotaRows reads Argon's own 5-hour window when quota-axi reports it", () => {
+  const report = structuredClone(quota);
+  report.providers[1].windows.push({ id: "gemini_argon_5h", kind: "session", percentRemaining: 21, resetsAt: "2026-11-12T04:15:00.000Z" });
+  const argon = quotaRows(ran(report))[3];
+  assert.deepEqual(argon.fiveHour, { left: 21, resetAt: Date.parse("2026-11-12T04:15:00Z") });
+  assert.deepEqual(argon.weekly, { left: 42, resetAt: Date.parse("2026-11-16T00:50:05Z") });
+  // The folded rail shows the tighter of the two: here the 5-hour share, not the weekly 42%.
+  assert.deepEqual(tightest(argon, NOW), { text: "21%", level: "warn" });
+  assert.match(tip(argon, NOW), /^Argon\. 5-hour: 21% left, resets .*\. Weekly: 42% left, resets /);
+  // Gemini's own windows aren't taken for Argon's, nor Argon's for Gemini's.
+  assert.deepEqual(quotaRows(ran(report))[2].fiveHour, { left: 98, resetAt: Date.parse("2026-11-12T06:00:00Z") });
+});
+
+test("quotaRows leaves Argon's 5-hour cell empty when only its weekly window is reported", () => {
+  const argon = quotaRows(ran(quota))[3];
+  assert.equal(argon.fiveHour, null);
+  assert.deepEqual(argon.weekly, { left: 42, resetAt: Date.parse("2026-11-16T00:50:05Z") });
+  assert.deepEqual(tightest(argon, NOW), { text: "42%", level: "ok" });
+  assert.match(tip(argon, NOW), /^Argon\. 5-hour: not reported\. Weekly: 42% left, resets /);
+});
+
+test("a weekly-only row folds to its weekly share and says the 5-hour window isn't reported", () => {
+  const [, fable] = quotaRows(ran(quota));
+  assert.deepEqual(tightest(fable, NOW), { text: "77%", level: "ok" });
+  assert.match(tip(fable, NOW), /^Fable, max plan\. 5-hour: not reported\. Weekly: 77% left, resets /);
+});
+
 test("clock is local time with the weekday", () => {
   assert.equal(clock(new Date(2026, 10, 12, 14, 5).getTime()), "Thu 14:05");
   assert.equal(clock(new Date(2026, 10, 15, 0, 0).getTime()), "Sun 00:00");
@@ -229,7 +282,7 @@ test("tip spells the row out", () => {
   assert.equal(tip(pendingRows().codex[0], at), "Codex: reading…");
 });
 
-test("pendingRows stands in for all three until the first read", () => {
+test("pendingRows stands in for every row until the first read", () => {
   const { quota: q, codex } = pendingRows();
-  assert.deepEqual([...q, ...codex].map((r) => [r.name, r.pending]), [["Claude", true], ["Gemini", true], ["Codex", true]]);
+  assert.deepEqual([...q, ...codex].map((r) => [r.name, r.pending]), [["Claude", true], ["Fable", true], ["Gemini", true], ["Argon", true], ["Codex", true]]);
 });
