@@ -29,11 +29,14 @@ const LOW_BELOW = 10;
 const FIVE_HOURS_MIN = 300;
 const WEEK_MIN = 10080;
 
-// Which quota-axi provider and window ids make each row. quota-axi lists more windows
-// (per-model ones); only the plain 5-hour and weekly ones are shown.
+// Which quota-axi provider and window ids make each row, in display order. quota-axi lists
+// more windows; only these are shown. Fable and Argon have their own weekly limit apart
+// from their provider's plain windows, so their rows have no 5-hour window.
 const QUOTA_ROWS = [
   { id: "claude", name: "Claude", provider: "claude", fiveHour: "five_hour", weekly: "seven_day" },
+  { id: "fable", name: "Fable", provider: "claude", fiveHour: null, weekly: "model:fable" },
   { id: "gemini", name: "Gemini", provider: "agy", fiveHour: "gemini_5h", weekly: "gemini_weekly" },
+  { id: "argon", name: "Argon", provider: "agy", fiveHour: null, weekly: "gemini_argon_weekly" },
 ];
 
 // quota-axi's own words for a provider it couldn't read, said the way the tooltip says them.
@@ -101,7 +104,7 @@ function failure(program, ran) {
 }
 
 /**
- * Claude and Gemini rows from `quota-axi --provider claude,agy --json`.
+ * Claude, Fable, Gemini and Argon rows from `quota-axi --provider claude,agy --json`.
  * @param {Ran} ran
  * @returns {Row[]}
  */
@@ -124,9 +127,9 @@ export function quotaRows(ran) {
       const left = num(w?.percentRemaining);
       return left === null ? null : { left: clamp(left), resetAt: time(w.resetsAt) };
     };
-    const fiveHour = win(r.fiveHour);
+    const fiveHour = r.fiveHour ? win(r.fiveHour) : null;
     const weekly = win(r.weekly);
-    if (!fiveHour && !weekly) return unavailable(r.id, r.name, "no 5-hour or weekly window reported");
+    if (!fiveHour && !weekly) return unavailable(r.id, r.name, r.fiveHour ? "no 5-hour or weekly window reported" : "no weekly window reported");
     // A reused reading says when it was taken; a fresh one was taken just now. A stale one
     // without its time is of unknown age, not new.
     const readAt = time(p.state?.refreshedAt) ?? (status === "fresh" ? generatedAt : null);
