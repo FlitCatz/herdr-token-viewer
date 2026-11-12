@@ -78,8 +78,8 @@ shows only when one is reported.
     `providers[]`: `claude` windows `five_hour` and `seven_day` (Claude) and `model:fable`
     (Fable, weekly only), `agy` windows `gemini_5h` and `gemini_weekly` (Gemini) and
     `gemini_argon_5h` (when reported) and `gemini_argon_weekly` (Argon); each window's
-    `percentRemaining` and `resetsAt`; `plan`; `state.status`; the reading's time is `state.refreshedAt`, else for a `fresh` reading
-    the report's `generatedAt`. Plain `--json` drops `refreshedAt` unless the reading was
+    `percentRemaining` and `resetsAt`; `plan`; `state.status`; the reading's time is
+    `state.refreshedAt`, else for a `fresh` reading the report's `generatedAt`. Plain `--json` drops `refreshedAt` unless the reading was
     reused, so a `stale` reading without it is of unknown time and shows `old`. Other
     windows (agy's `claude_gpt_*` ones, for example) are ignored.
   - `codex-multi-auth limits --json`. From `accounts[]`: `index`, `label`, `current`,
