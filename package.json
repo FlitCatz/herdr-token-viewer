@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "herdr-app check mods/herdr-token-viewer && tsc -p mods/herdr-token-viewer/jsconfig.json"
+  }
+}
