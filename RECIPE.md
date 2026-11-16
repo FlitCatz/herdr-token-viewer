@@ -116,7 +116,8 @@ shows only when one is reported.
 - `theme()` is typed `Record<string, string>` but the color setters want `#rrggbb`: cast it
   once (`import("gpui-kit").Color`) or `tsc` reports every color.
 - `herdr-app check` builds the view once in a hidden window: it proves the mod loads, not
-  that the programs answer.
+  that the programs answer. Skip the start read while `checking()` is true (Herdr 0.1.16+)
+  so a check runs neither program.
 
 ## Done when
 
