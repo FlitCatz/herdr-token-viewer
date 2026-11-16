@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { exec, theme } from "herdr";
+import { checking, exec, theme } from "herdr";
 import { CODEX_MULTI_AUTH, QUOTA_AXI, age, cell, codexRows, pendingRows, quotaRows, tightest, tip } from "./usage.js";
 
 /** @typedef {import("gpui-kit").Context} Context */
@@ -46,7 +46,9 @@ export default class TokenViewer extends View {
     this.width = Infinity;
     cx.timer.every(REFRESH_MS, (cx) => this.refresh(cx));
     cx.timer.every(MINUTE_MS, (cx) => cx.notify());
-    this.refresh(cx);
+    // `herdr-app check` runs init() for real; it only proves the mod loads, so it must not
+    // start quota-axi or codex-multi-auth. The timers above never fire within a check.
+    if (!checking()) this.refresh(cx);
   }
 
   /** @param {Context} cx */
