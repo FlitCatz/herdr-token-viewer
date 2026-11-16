@@ -93,9 +93,10 @@ export default class TokenViewer extends View {
    * @param {Record<string, Color>} t
    * @param {Row} row
    * @param {number} now
+   * @param {number} staleMs the row's source's `staleMs`
    */
-  row(t, row, now) {
-    const old = age(row, now, SOURCES[this.rows.codex.includes(row) ? "codex" : "quota"].staleMs);
+  row(t, row, now, staleMs) {
+    const old = age(row, now, staleMs);
     const missing = row.pending || Boolean(row.reason);
     return h_flex().id(`usage-${row.id}`).h(26).flex_none().gap(GAP).items_center().tooltip(tip(row, now))
       .child(h_flex().flex_1().min_w(0).gap(4).items_center()
@@ -125,8 +126,8 @@ export default class TokenViewer extends View {
   render() {
     const t = /** @type {Record<string, Color>} */ (theme());
     const now = Date.now();
-    const [claude, fable, gemini, argon] = this.rows.quota;
-    const rows = [claude, fable, ...this.rows.codex, gemini, argon];
+    const [claude, fable, gemini, argon] = this.rows.quota.map((row) => ({ row, staleMs: SOURCES.quota.staleMs }));
+    const rows = [claude, fable, ...this.rows.codex.map((row) => ({ row, staleMs: SOURCES.codex.staleMs })), gemini, argon];
     const rail = this.width < RAIL_BELOW;
     const head = (/** @type {string} */ label) => div().w(CELL_W).flex_none().text_size(10.5).text_color(t.dim).child(label);
     return v_flex().id("root").size_full().min_h(0).bg(t.chrome).border_t(1).border_color(t.border).text_size(12.5)
@@ -140,6 +141,6 @@ export default class TokenViewer extends View {
         .child(head("5h"))
         .child(head("Week"))))
       .child(v_flex().id("usage-rows").flex_1().min_h(0).px(rail ? 0 : PAD).pt(rail ? 6 : 0).overflow_y_scrollbar()
-        .children(rows.map((row) => (rail ? this.railRow(t, row, now) : this.row(t, row, now)))));
+        .children(rows.map(({ row, staleMs }) => (rail ? this.railRow(t, row, now) : this.row(t, row, now, staleMs)))));
   }
 }

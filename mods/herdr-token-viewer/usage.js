@@ -19,10 +19,6 @@
 
 export const QUOTA_AXI = "quota-axi";
 export const CODEX_MULTI_AUTH = "codex-multi-auth";
-export const QUOTA_REFRESH_MS = 120000;
-// `limits --refresh` skips an account read less than 5 minutes ago, so Codex runs 30 s
-// past that and every account is due on each run.
-export const CODEX_REFRESH_MS = 330000;
 
 const WARN_BELOW = 25;
 const LOW_BELOW = 10;
@@ -277,19 +273,19 @@ export function tip(row, now) {
 }
 
 // The two programs read independently on their own cadences (quota every 2 minutes, Codex
-// about every 5 minutes) so a slow call in one never delays the other. Both query live
-// usage without renewing credentials: quota-axi is told not to renew a session, and
-// `limits --json --refresh` refreshes each Codex account's limits.
+// about every 6 minutes) so a slow call in one never delays the other. Both query live
+// usage. quota-axi stays read-only: it is told not to renew a session. `limits --json
+// --refresh` refreshes each Codex account's limits and can renew and save Codex login
+// tokens on the way.
 // A reading older than `staleMs` shows its age in the row. Each is a minute longer than
 // its source's refresh, so a reading simply waiting for the next refresh doesn't flicker
-// an age. `limits --refresh` probes the Codex accounts one after another, up to 15 s
-// each, so Codex gets a longer `timeoutMs`.
+// an age.
 export const SOURCES = {
   quota: {
     command: QUOTA_AXI,
     // --max-age lets several windows share one vendor read.
     args: ["--provider", "claude,agy", "--json", "--no-credential-refresh", "--max-age", "60s"],
-    intervalMs: QUOTA_REFRESH_MS,
+    intervalMs: 120000,
     staleMs: 180000,
     timeoutMs: 30000,
     rows: quotaRows,
@@ -297,9 +293,13 @@ export const SOURCES = {
   codex: {
     command: CODEX_MULTI_AUTH,
     args: ["limits", "--json", "--refresh"],
-    intervalMs: CODEX_REFRESH_MS,
-    staleMs: 390000,
-    timeoutMs: 120000,
+    // `limits --refresh` skips an account read less than 5 minutes ago, and stamps each
+    // account only after probing the ones before it, so Codex runs a minute past that.
+    intervalMs: 360000,
+    staleMs: 420000,
+    // It visits the accounts one after another, with up to two 15 s calls and a possible
+    // token renewal each; cutting it off mid-renewal could lose a renewed token.
+    timeoutMs: 180000,
     rows: codexRows,
   },
 };
