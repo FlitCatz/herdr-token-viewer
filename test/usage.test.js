@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  STALE_MS, age, cell, clock, codexRows, pendingRows, quotaRows, span, tightest, tip, unavailable,
+  CODEX_MULTI_AUTH, CODEX_REFRESH_MS, QUOTA_AXI, QUOTA_REFRESH_MS, SOURCES, STALE_MS,
+  age, cell, clock, codexRows, pendingRows, quotaRows, span, tightest, tip, unavailable,
 } from "../mods/herdr-token-viewer/usage.js";
 
 const MIN = 60000;
@@ -285,4 +286,18 @@ test("tip spells the row out", () => {
 test("pendingRows stands in for every row until the first read", () => {
   const { quota: q, codex } = pendingRows();
   assert.deepEqual([...q, ...codex].map((r) => [r.name, r.pending]), [["Claude", true], ["Fable", true], ["Gemini", true], ["Argon", true], ["Codex", true]]);
+});
+
+test("SOURCES configures independent cadences and arguments for quota and codex", () => {
+  assert.equal(QUOTA_REFRESH_MS, 2 * MIN);
+  assert.equal(CODEX_REFRESH_MS, 5 * MIN);
+  assert.equal(SOURCES.quota.command, QUOTA_AXI);
+  assert.equal(SOURCES.quota.intervalMs, 2 * MIN);
+  assert.deepEqual(SOURCES.quota.args, ["--provider", "claude,agy", "--json", "--no-credential-refresh", "--max-age", "60s"]);
+  assert.equal(SOURCES.quota.rows, quotaRows);
+
+  assert.equal(SOURCES.codex.command, CODEX_MULTI_AUTH);
+  assert.equal(SOURCES.codex.intervalMs, 5 * MIN);
+  assert.deepEqual(SOURCES.codex.args, ["limits", "--json", "--refresh"]);
+  assert.equal(SOURCES.codex.rows, codexRows);
 });

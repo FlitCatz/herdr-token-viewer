@@ -44,9 +44,10 @@ shows only when one is reported.
 
 - Agent status (working, blocked, done, idle) changes nothing here; the list is about
   quota, not agents.
-- On start and every 120 s it runs the two programs, each on its own so the fast one shows
-  first, off the UI thread, 30 s timeout each. A read still in flight isn't started twice.
-  Every 60 s it redraws so countdowns and ages move.
+- On start, it runs both programs independently off the UI thread (30 s timeout each):
+  `quota-axi` every 120 s and `codex-multi-auth` every 300 s, so a slow call in one never
+  delays the other. A read still in flight isn't started twice. Every 60 s it redraws so
+  countdowns and ages move.
 - Each read replaces its rows. A failed read shows `unavailable`; an earlier reading is
   never kept to stand in for it.
 - Hover a row: a tooltip with the whole reading in one line, for example
@@ -82,7 +83,7 @@ shows only when one is reported.
     `state.refreshedAt`, else for a `fresh` reading the report's `generatedAt`. Plain `--json` drops `refreshedAt` unless the reading was
     reused, so a `stale` reading without it is of unknown time and shows `old`. Other
     windows (agy's `claude_gpt_*` ones, for example) are ignored.
-  - `codex-multi-auth limits --json`. From `accounts[]`: `index`, `label`, `current`,
+  - `codex-multi-auth limits --json --refresh`. From `accounts[]`: `index`, `label`, `current`,
     `enabled`, and `quota`: `planType`, `updatedAt`, and in `primary` / `secondary` the
     window with `windowMinutes` 300 (5-hour) and 10080 (weekly): `usedPercent` (shown as
     100 minus it) and `resetAtMs`. Read the windows whatever `status` says: a 429 entry
@@ -90,8 +91,9 @@ shows only when one is reported.
 - `herdr`: `exec()`, `theme()`. gpui-kit: `cx.timer.every`, `cx.spawn`, `.tooltip()`,
   `.on_size_change()` (its own width decides rail or full), `h_flex` / `v_flex` from
   gpui-base.
-- Network: only what quota-axi does itself (it asks each vendor for the quota). The mod
-  reads no file and stores nothing: no shared state, no localStorage.
+- Network: only what `quota-axi` and `codex-multi-auth limits --refresh` do themselves
+  (each asks its vendor for the quota). The mod reads no file and stores nothing: no shared
+  state, no localStorage.
 
 ## Watch out
 
@@ -99,8 +101,10 @@ shows only when one is reported.
   them to milliseconds before `Date.parse`.
 - Go by `windowMinutes`, not by `primary` / `secondary`: a plan with only a weekly window
   reports it as `primary`.
-- codex-multi-auth's readings are as old as its last look (`updatedAt`), often an hour.
-  Don't show them as current: show the age, and drop a share whose window has since reset.
+- A Codex reading's `updatedAt` can still be older than the last refresh (for example when
+  an account's refresh fails and `codex-multi-auth` falls back to its saved reading).
+  Don't show stale readings as current: show the age, and drop a share whose window has
+  since reset.
 - `--no-credential-refresh` keeps the mod read-only: quota-axi won't have a vendor CLI
   renew an expired session. Such a provider says `unavailable` until its own CLI renews it.
 - A report can be valid although the program exits non-zero; read the output first and
@@ -139,5 +143,5 @@ shows only when one is reported.
   while Claude and Codex still show numbers.
 - With neither program on `PATH`, the list is `Claude`, `Fable`, `Codex`, `Gemini`,
   `Argon`, each `unavailable`, and Herdr stays responsive.
-- The programs are run again 120 s after the last read, not sooner.
+- `quota-axi` is run again 120 s after the last read and `codex-multi-auth` every 300 s, not sooner.
 - With the sidebar folded, each row is an initial and one number.

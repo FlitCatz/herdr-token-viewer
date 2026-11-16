@@ -19,8 +19,10 @@
 
 export const QUOTA_AXI = "quota-axi";
 export const CODEX_MULTI_AUTH = "codex-multi-auth";
+export const QUOTA_REFRESH_MS = 120000;
+export const CODEX_REFRESH_MS = 300000;
 
-// A reading older than this shows its age in the row. Longer than one refresh, so a
+// A reading older than this shows its age in the row. Longer than one quota refresh, so a
 // reading that is simply waiting for the next refresh doesn't flicker "2m".
 export const STALE_MS = 3 * 60000;
 
@@ -139,7 +141,7 @@ export function quotaRows(ran) {
 }
 
 /**
- * One row per Codex account from `codex-multi-auth limits --json`, in its order. The
+ * One row per Codex account from `codex-multi-auth limits --json --refresh`, in its order. The
  * account's masked label is its identity, so a row keeps its place in the list while the
  * accounts rotate.
  * @param {Ran} ran
@@ -274,3 +276,23 @@ export function tip(row, now) {
   const read = row.readAt === null ? " Read at an unknown time." : ` Read ${span(now - row.readAt)} ago.`;
   return `${who}. ${part("5-hour", row.fiveHour)}. ${part("Weekly", row.weekly)}.${read}`;
 }
+
+// The two programs read independently on their own cadences (quota every 2 minutes, Codex
+// every 5 minutes) so a slow call in one never delays the other. Both query live usage
+// without renewing credentials: quota-axi is told not to renew a session, and
+// `limits --json --refresh` refreshes each Codex account's limits.
+export const SOURCES = {
+  quota: {
+    command: QUOTA_AXI,
+    // --max-age lets several windows share one vendor read.
+    args: ["--provider", "claude,agy", "--json", "--no-credential-refresh", "--max-age", "60s"],
+    intervalMs: QUOTA_REFRESH_MS,
+    rows: quotaRows,
+  },
+  codex: {
+    command: CODEX_MULTI_AUTH,
+    args: ["limits", "--json", "--refresh"],
+    intervalMs: CODEX_REFRESH_MS,
+    rows: codexRows,
+  },
+};
