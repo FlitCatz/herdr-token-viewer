@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  STALE_MS, age, cell, clock, codexRows, pendingRows, quotaRows, span, tightest, tip, unavailable,
+  SOURCES,
+  age, cell, clock, codexRows, pendingRows, quotaRows, span, tightest, tip, unavailable,
 } from "../mods/herdr-token-viewer/usage.js";
 
 const MIN = 60000;
@@ -213,15 +214,18 @@ test("cell drops a share that was read before its window reset", () => {
   assert.deepEqual(cell({ left: 5, resetAt: NOW }, NOW), { percent: "–", reset: "reset", left: null, level: "none" });
 });
 
-test("age speaks up only once a reading is older than a refresh", () => {
+test("age speaks up only once a reading is older than its source's refresh", () => {
   const [row] = codexRows(ran(limits));
-  assert.equal(age(row, NOW), "46m");
-  assert.equal(age({ ...row, readAt: NOW - STALE_MS + 1 }, NOW), null);
-  assert.equal(age({ ...row, readAt: NOW - STALE_MS }, NOW), "3m");
-  assert.equal(age({ ...row, readAt: NOW - 7 * HOUR - 59 * MIN }, NOW), "7h");
-  assert.equal(age({ ...row, readAt: NOW - 49 * HOUR }, NOW), "2d");
-  assert.equal(age({ ...row, readAt: null }, NOW), "old");
-  assert.equal(age(pendingRows().codex[0], NOW), null);
+  const stale = 3 * MIN;
+  assert.equal(age(row, NOW, stale), "46m");
+  assert.equal(age({ ...row, readAt: NOW - stale + 1 }, NOW, stale), null);
+  assert.equal(age({ ...row, readAt: NOW - stale }, NOW, stale), "3m");
+  assert.equal(age({ ...row, readAt: NOW - 7 * MIN }, NOW, 7 * MIN), "7m");
+  assert.equal(age({ ...row, readAt: NOW - 7 * MIN + 1 }, NOW, 7 * MIN), null);
+  assert.equal(age({ ...row, readAt: NOW - 7 * HOUR - 59 * MIN }, NOW, stale), "7h");
+  assert.equal(age({ ...row, readAt: NOW - 49 * HOUR }, NOW, stale), "2d");
+  assert.equal(age({ ...row, readAt: null }, NOW, stale), "old");
+  assert.equal(age(pendingRows().codex[0], NOW, stale), null);
 });
 
 test("tightest picks the smaller share for the folded sidebar", () => {
@@ -285,4 +289,18 @@ test("tip spells the row out", () => {
 test("pendingRows stands in for every row until the first read", () => {
   const { quota: q, codex } = pendingRows();
   assert.deepEqual([...q, ...codex].map((r) => [r.name, r.pending]), [["Claude", true], ["Fable", true], ["Gemini", true], ["Argon", true], ["Codex", true]]);
+});
+
+test("SOURCES reads Codex live past codex-multi-auth's 5-minute gate, quota without renewing", () => {
+  // codex-multi-auth's `limits --refresh` skips an account read less than 5 minutes ago.
+  assert.ok(SOURCES.codex.intervalMs > 5 * MIN);
+  assert.ok(SOURCES.codex.args.includes("--refresh"));
+  assert.ok(SOURCES.quota.args.includes("--no-credential-refresh"));
+  for (const [key, source] of Object.entries(SOURCES)) {
+    // A row waiting for its next refresh shows no age, and a read ends before the next is due.
+    assert.ok(source.staleMs > source.intervalMs, key);
+    assert.ok(source.timeoutMs < source.intervalMs, key);
+    const row = { ...codexRows(ran(limits))[0], readAt: NOW - source.intervalMs };
+    assert.equal(age(row, NOW, source.staleMs), null, key);
+  }
 });

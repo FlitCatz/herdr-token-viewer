@@ -20,10 +20,6 @@
 export const QUOTA_AXI = "quota-axi";
 export const CODEX_MULTI_AUTH = "codex-multi-auth";
 
-// A reading older than this shows its age in the row. Longer than one refresh, so a
-// reading that is simply waiting for the next refresh doesn't flicker "2m".
-export const STALE_MS = 3 * 60000;
-
 const WARN_BELOW = 25;
 const LOW_BELOW = 10;
 const FIVE_HOURS_MIN = 300;
@@ -139,7 +135,7 @@ export function quotaRows(ran) {
 }
 
 /**
- * One row per Codex account from `codex-multi-auth limits --json`, in its order. The
+ * One row per Codex account from `codex-multi-auth limits --json --refresh`, in its order. The
  * account's masked label is its identity, so a row keeps its place in the list while the
  * accounts rotate.
  * @param {Ran} ran
@@ -221,11 +217,12 @@ export function cell(win, now) {
  * it is one unit only: `46m`, `7h`, `2d`, or `old` for a reading of unknown time.
  * @param {Row} row
  * @param {number} now
+ * @param {number} staleMs the row's source's `staleMs`
  */
-export function age(row, now) {
+export function age(row, now, staleMs) {
   if (row.pending || row.reason) return null;
   if (row.readAt === null) return "old";
-  if (now - row.readAt < STALE_MS) return null;
+  if (now - row.readAt < staleMs) return null;
   const m = Math.floor((now - row.readAt) / 60000);
   if (m < 60) return `${m}m`;
   return m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`;
@@ -274,3 +271,35 @@ export function tip(row, now) {
   const read = row.readAt === null ? " Read at an unknown time." : ` Read ${span(now - row.readAt)} ago.`;
   return `${who}. ${part("5-hour", row.fiveHour)}. ${part("Weekly", row.weekly)}.${read}`;
 }
+
+// The two programs read independently on their own cadences (quota every 2 minutes, Codex
+// about every 6 minutes) so a slow call in one never delays the other. Both query live
+// usage. quota-axi stays read-only: it is told not to renew a session. `limits --json
+// --refresh` refreshes each Codex account's limits and can renew and save Codex login
+// tokens on the way.
+// A reading older than `staleMs` shows its age in the row. Each is a minute longer than
+// its source's refresh, so a reading simply waiting for the next refresh doesn't flicker
+// an age.
+export const SOURCES = {
+  quota: {
+    command: QUOTA_AXI,
+    // --max-age lets several windows share one vendor read.
+    args: ["--provider", "claude,agy", "--json", "--no-credential-refresh", "--max-age", "60s"],
+    intervalMs: 120000,
+    staleMs: 180000,
+    timeoutMs: 30000,
+    rows: quotaRows,
+  },
+  codex: {
+    command: CODEX_MULTI_AUTH,
+    args: ["limits", "--json", "--refresh"],
+    // `limits --refresh` skips an account read less than 5 minutes ago, and stamps each
+    // account only after probing the ones before it, so Codex runs a minute past that.
+    intervalMs: 360000,
+    staleMs: 420000,
+    // It visits the accounts one after another, with up to two 15 s calls and a possible
+    // token renewal each; cutting it off mid-renewal could lose a renewed token.
+    timeoutMs: 180000,
+    rows: codexRows,
+  },
+};

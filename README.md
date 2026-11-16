@@ -18,25 +18,28 @@ Fable and Argon have limits of their own, so each has a row too.
 - Each window shows the share **left** (`84%`), the time to its reset (`3h40m`, `1d17h`)
   and a thin bar. The number turns the theme's `working` color under 25% and its
   `blocked` color under 10%.
-- A reading older than 3 minutes shows its age beside the name (`46m`, `7h`), and one
-  whose time isn't known shows `old`. codex-multi-auth's numbers are the ones it last
-  saw, so Codex rows usually have one.
+- A reading still there a minute after its refresh was due (3 minutes old for Claude and
+  Gemini, 7 minutes for Codex) shows its age beside the name (`46m`, `7h`), and one
+  whose time isn't known shows `old`.
 - A window that reset after its reading shows `–` and `reset` instead of an outdated share.
 - A provider or account with no reading says `unavailable`; the tooltip says why
   (not set up, sign-in needed, the program is missing, ...). Nothing is guessed.
 - Hover a row for the details: plan, exact reset times, the age of the reading and, for
   Codex, the account's masked label.
-- It reads again every 2 minutes.
+- It reads Claude and Gemini every 2 minutes, and Codex about every 6 minutes:
+  codex-multi-auth skips an account read less than 5 minutes ago, and the extra minute
+  keeps every account due on each run.
 - With the sidebar folded to its rail, each row is one number: the smaller of its two shares.
 
 ### Where the numbers come from
 
-The mod runs two programs you already have, and only reads:
+The mod runs two programs you already have. quota-axi stays read-only; codex-multi-auth's
+live refresh can renew and save Codex login tokens:
 
 | Rows | Program | Notes |
 |---|---|---|
 | Claude, Fable, Gemini, Argon | `quota-axi --provider claude,agy --json --no-credential-refresh --max-age 60s` | [quota-axi](https://github.com/kunchenguid/quota-axi) asks Anthropic and Google with the sign-ins Claude Code and Antigravity (`agy`) keep on this machine. It is told not to renew a session, so an expired one shows as unavailable until its own CLI renews it. |
-| Codex | `codex-multi-auth limits --json` | Every account, from the readings codex-multi-auth last saved (without `--refresh` it answers from its cache). quota-axi sees only the one account Codex is signed in to. |
+| Codex | `codex-multi-auth limits --json --refresh` | Queries live limits for every Codex account about every 6 minutes. On the way it can renew and save an account's Codex login tokens. quota-axi sees only the one account Codex is signed in to. |
 
 No token, email address or account id is read by the mod, stored or shown, apart from the
 label codex-multi-auth already masks. Without one of the programs, its rows say

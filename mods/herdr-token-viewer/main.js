@@ -1,30 +1,16 @@
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { checking, exec, theme } from "herdr";
-import { CODEX_MULTI_AUTH, QUOTA_AXI, age, cell, codexRows, pendingRows, quotaRows, tightest, tip } from "./usage.js";
+import { SOURCES, age, cell, pendingRows, tightest, tip } from "./usage.js";
 
 /** @typedef {import("gpui-kit").Context} Context */
 /** @typedef {import("gpui-kit").Color} Color */
 /** @typedef {import("./usage.js").Row} Row */
 
-// quota-axi asks each vendor on every read, and a copy keeps its timers while hidden, so
-// the refresh stays slow. Countdowns and ages move by the minute between refreshes.
-const REFRESH_MS = 120000;
+// quota-axi asks each vendor on every read, and codex-multi-auth refreshes each Codex
+// account live on its own slower cadence; a copy keeps its timers while hidden, so the
+// refreshes stay slow. Countdowns and ages move by the minute between refreshes.
 const MINUTE_MS = 60000;
-const EXEC_TIMEOUT_MS = 30000;
-
-// The two programs read, each on its own so Codex's instant answer doesn't wait for
-// quota-axi's network round trip. Both only read: quota-axi is told not to renew a
-// session, and `limits` without --refresh prints what codex-multi-auth last saw.
-const SOURCES = {
-  quota: {
-    command: QUOTA_AXI,
-    // --max-age lets several windows share one vendor read.
-    args: ["--provider", "claude,agy", "--json", "--no-credential-refresh", "--max-age", "60s"],
-    rows: quotaRows,
-  },
-  codex: { command: CODEX_MULTI_AUTH, args: ["limits", "--json"], rows: codexRows },
-};
 
 // Below this width the sidebar is its folded rail and each row is one number.
 const RAIL_BELOW = 160;
@@ -44,31 +30,38 @@ export default class TokenViewer extends View {
     /** @type {Set<string>} sources with a read in flight */
     this.reading = new Set();
     this.width = Infinity;
-    cx.timer.every(REFRESH_MS, (cx) => this.refresh(cx));
+    for (const [key, source] of Object.entries(SOURCES)) {
+      cx.timer.every(source.intervalMs, (cx) => this.refresh(cx, /** @type {keyof typeof SOURCES} */ (key)));
+    }
     cx.timer.every(MINUTE_MS, (cx) => cx.notify());
     // `herdr-app check` runs init() for real; it only proves the mod loads, so it must not
     // start quota-axi or codex-multi-auth. The timers above never fire within a check.
-    if (!checking()) this.refresh(cx);
+    if (!checking()) {
+      for (const key of /** @type {(keyof typeof SOURCES)[]} */ (Object.keys(SOURCES))) {
+        this.refresh(cx, key);
+      }
+    }
   }
 
-  /** @param {Context} cx */
-  refresh(cx) {
-    for (const key of /** @type {(keyof typeof SOURCES)[]} */ (Object.keys(SOURCES))) {
-      if (this.reading.has(key)) continue;
-      this.reading.add(key);
-      const source = SOURCES[key];
-      cx.spawn(async (cx) => {
-        // A program that is missing or hangs past the timeout leaves null, which the row
-        // rules turn into "unavailable" rows, as they do output they can't read. Nothing
-        // is kept from an earlier read to stand in for it.
-        /** @type {import("./usage.js").Ran} */
-        let ran = null;
-        try { ran = await exec(source.command, source.args, { timeout: EXEC_TIMEOUT_MS }); } catch { /* stays null */ }
-        this.rows[key] = source.rows(ran);
-        this.reading.delete(key);
-        cx.notify();
-      });
-    }
+  /**
+   * @param {Context} cx
+   * @param {keyof typeof SOURCES} key
+   */
+  refresh(cx, key) {
+    if (this.reading.has(key)) return;
+    this.reading.add(key);
+    const source = SOURCES[key];
+    cx.spawn(async (cx) => {
+      // A program that is missing or hangs past the timeout leaves null, which the row
+      // rules turn into "unavailable" rows, as they do output they can't read. Nothing
+      // is kept from an earlier read to stand in for it.
+      /** @type {import("./usage.js").Ran} */
+      let ran = null;
+      try { ran = await exec(source.command, source.args, { timeout: source.timeoutMs }); } catch { /* stays null */ }
+      this.rows[key] = source.rows(ran);
+      this.reading.delete(key);
+      cx.notify();
+    });
   }
 
   /**
@@ -100,9 +93,10 @@ export default class TokenViewer extends View {
    * @param {Record<string, Color>} t
    * @param {Row} row
    * @param {number} now
+   * @param {number} staleMs the row's source's `staleMs`
    */
-  row(t, row, now) {
-    const old = age(row, now);
+  row(t, row, now, staleMs) {
+    const old = age(row, now, staleMs);
     const missing = row.pending || Boolean(row.reason);
     return h_flex().id(`usage-${row.id}`).h(26).flex_none().gap(GAP).items_center().tooltip(tip(row, now))
       .child(h_flex().flex_1().min_w(0).gap(4).items_center()
@@ -132,8 +126,8 @@ export default class TokenViewer extends View {
   render() {
     const t = /** @type {Record<string, Color>} */ (theme());
     const now = Date.now();
-    const [claude, fable, gemini, argon] = this.rows.quota;
-    const rows = [claude, fable, ...this.rows.codex, gemini, argon];
+    const [claude, fable, gemini, argon] = this.rows.quota.map((row) => ({ row, staleMs: SOURCES.quota.staleMs }));
+    const rows = [claude, fable, ...this.rows.codex.map((row) => ({ row, staleMs: SOURCES.codex.staleMs })), gemini, argon];
     const rail = this.width < RAIL_BELOW;
     const head = (/** @type {string} */ label) => div().w(CELL_W).flex_none().text_size(10.5).text_color(t.dim).child(label);
     return v_flex().id("root").size_full().min_h(0).bg(t.chrome).border_t(1).border_color(t.border).text_size(12.5)
@@ -147,6 +141,6 @@ export default class TokenViewer extends View {
         .child(head("5h"))
         .child(head("Week"))))
       .child(v_flex().id("usage-rows").flex_1().min_h(0).px(rail ? 0 : PAD).pt(rail ? 6 : 0).overflow_y_scrollbar()
-        .children(rows.map((row) => (rail ? this.railRow(t, row, now) : this.row(t, row, now)))));
+        .children(rows.map(({ row, staleMs }) => (rail ? this.railRow(t, row, now) : this.row(t, row, now, staleMs)))));
   }
 }
