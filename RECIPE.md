@@ -23,8 +23,8 @@ shows only when one is reported.
   the usual one when a 5-hour Argon reading is reported, else `–` with an empty bar.
   - Left: the name (`foreground`; `muted` for a disabled account or a row without a
     reading), then a 5 px round `accent` dot on the Codex account in use, then the
-    reading's age (10.5 px, `dim`) once it is 3 minutes old or more: `46m`, `7h`, `2d`;
-    `old` when the reading's time isn't known.
+    reading's age (10.5 px, `dim`) once it is 3 minutes old or more (6.5 minutes for a
+    Codex row): `46m`, `7h`, `2d`; `old` when the reading's time isn't known.
   - Two cells, 68 px each: the share left (`84%`, 11.5 px, medium) at the left, the time to
     the reset (10.5 px, `dim`) at the right, and under them a 2 px bar: track `border`,
     filled to the share left.
@@ -44,9 +44,11 @@ shows only when one is reported.
 
 - Agent status (working, blocked, done, idle) changes nothing here; the list is about
   quota, not agents.
-- On start, it runs both programs independently off the UI thread (30 s timeout each):
-  `quota-axi` every 120 s and `codex-multi-auth` every 300 s, so a slow call in one never
-  delays the other. A read still in flight isn't started twice. Every 60 s it redraws so
+- On start, it runs both programs independently off the UI thread: `quota-axi` every
+  120 s (30 s timeout) and `codex-multi-auth` about every 5 minutes (120 s timeout, as it
+  probes the accounts one after another), so a slow call in one never delays the other.
+  Codex runs every 330 s: `limits --refresh` skips an account read less than 5 minutes
+  ago, and the 30 s margin keeps every account due on each run. A read still in flight isn't started twice. Every 60 s it redraws so
   countdowns and ages move.
 - Each read replaces its rows. A failed read shows `unavailable`; an earlier reading is
   never kept to stand in for it.
@@ -143,5 +145,5 @@ shows only when one is reported.
   while Claude and Codex still show numbers.
 - With neither program on `PATH`, the list is `Claude`, `Fable`, `Codex`, `Gemini`,
   `Argon`, each `unavailable`, and Herdr stays responsive.
-- `quota-axi` is run again 120 s after the last read and `codex-multi-auth` every 300 s, not sooner.
+- `quota-axi` is run again 120 s after the last read and `codex-multi-auth` every 330 s, not sooner.
 - With the sidebar folded, each row is an initial and one number.

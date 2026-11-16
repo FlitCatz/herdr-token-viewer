@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  CODEX_MULTI_AUTH, CODEX_REFRESH_MS, QUOTA_AXI, QUOTA_REFRESH_MS, SOURCES, STALE_MS,
+  CODEX_MULTI_AUTH, CODEX_REFRESH_MS, QUOTA_AXI, QUOTA_REFRESH_MS, SOURCES,
   age, cell, clock, codexRows, pendingRows, quotaRows, span, tightest, tip, unavailable,
 } from "../mods/herdr-token-viewer/usage.js";
 
@@ -214,15 +214,21 @@ test("cell drops a share that was read before its window reset", () => {
   assert.deepEqual(cell({ left: 5, resetAt: NOW }, NOW), { percent: "–", reset: "reset", left: null, level: "none" });
 });
 
-test("age speaks up only once a reading is older than a refresh", () => {
+test("age speaks up only once a reading is older than its source's refresh", () => {
   const [row] = codexRows(ran(limits));
-  assert.equal(age(row, NOW), "46m");
-  assert.equal(age({ ...row, readAt: NOW - STALE_MS + 1 }, NOW), null);
-  assert.equal(age({ ...row, readAt: NOW - STALE_MS }, NOW), "3m");
-  assert.equal(age({ ...row, readAt: NOW - 7 * HOUR - 59 * MIN }, NOW), "7h");
-  assert.equal(age({ ...row, readAt: NOW - 49 * HOUR }, NOW), "2d");
-  assert.equal(age({ ...row, readAt: null }, NOW), "old");
-  assert.equal(age(pendingRows().codex[0], NOW), null);
+  const quota = SOURCES.quota.staleMs;
+  const codex = SOURCES.codex.staleMs;
+  assert.equal(age(row, NOW, codex), "46m");
+  assert.equal(age({ ...row, readAt: NOW - 3 * MIN + 1 }, NOW, quota), null);
+  assert.equal(age({ ...row, readAt: NOW - 3 * MIN }, NOW, quota), "3m");
+  // A Codex reading one 5.5-minute refresh old is simply waiting for the next one.
+  assert.equal(age({ ...row, readAt: NOW - 5.5 * MIN }, NOW, codex), null);
+  assert.equal(age({ ...row, readAt: NOW - 6.5 * MIN + 1 }, NOW, codex), null);
+  assert.equal(age({ ...row, readAt: NOW - 6.5 * MIN }, NOW, codex), "6m");
+  assert.equal(age({ ...row, readAt: NOW - 7 * HOUR - 59 * MIN }, NOW, quota), "7h");
+  assert.equal(age({ ...row, readAt: NOW - 49 * HOUR }, NOW, quota), "2d");
+  assert.equal(age({ ...row, readAt: null }, NOW, quota), "old");
+  assert.equal(age(pendingRows().codex[0], NOW, codex), null);
 });
 
 test("tightest picks the smaller share for the folded sidebar", () => {
@@ -290,14 +296,20 @@ test("pendingRows stands in for every row until the first read", () => {
 
 test("SOURCES configures independent cadences and arguments for quota and codex", () => {
   assert.equal(QUOTA_REFRESH_MS, 2 * MIN);
-  assert.equal(CODEX_REFRESH_MS, 5 * MIN);
+  // codex-multi-auth's `limits --refresh` skips an account read less than 5 minutes ago.
+  assert.equal(CODEX_REFRESH_MS, 5.5 * MIN);
   assert.equal(SOURCES.quota.command, QUOTA_AXI);
   assert.equal(SOURCES.quota.intervalMs, 2 * MIN);
+  assert.equal(SOURCES.quota.staleMs, 3 * MIN);
+  assert.equal(SOURCES.quota.timeoutMs, 30000);
   assert.deepEqual(SOURCES.quota.args, ["--provider", "claude,agy", "--json", "--no-credential-refresh", "--max-age", "60s"]);
   assert.equal(SOURCES.quota.rows, quotaRows);
 
   assert.equal(SOURCES.codex.command, CODEX_MULTI_AUTH);
-  assert.equal(SOURCES.codex.intervalMs, 5 * MIN);
+  assert.equal(SOURCES.codex.intervalMs, 5.5 * MIN);
+  assert.equal(SOURCES.codex.staleMs, 6.5 * MIN);
+  // Room for several accounts probed in turn, each up to 15 s.
+  assert.equal(SOURCES.codex.timeoutMs, 2 * MIN);
   assert.deepEqual(SOURCES.codex.args, ["limits", "--json", "--refresh"]);
   assert.equal(SOURCES.codex.rows, codexRows);
 });

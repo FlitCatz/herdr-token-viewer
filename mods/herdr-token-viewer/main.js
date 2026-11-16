@@ -11,7 +11,6 @@ import { SOURCES, age, cell, pendingRows, tightest, tip } from "./usage.js";
 // account live on its own slower cadence; a copy keeps its timers while hidden, so the
 // refreshes stay slow. Countdowns and ages move by the minute between refreshes.
 const MINUTE_MS = 60000;
-const EXEC_TIMEOUT_MS = 30000;
 
 // Below this width the sidebar is its folded rail and each row is one number.
 const RAIL_BELOW = 160;
@@ -58,7 +57,7 @@ export default class TokenViewer extends View {
       // is kept from an earlier read to stand in for it.
       /** @type {import("./usage.js").Ran} */
       let ran = null;
-      try { ran = await exec(source.command, source.args, { timeout: EXEC_TIMEOUT_MS }); } catch { /* stays null */ }
+      try { ran = await exec(source.command, source.args, { timeout: source.timeoutMs }); } catch { /* stays null */ }
       this.rows[key] = source.rows(ran);
       this.reading.delete(key);
       cx.notify();
@@ -96,7 +95,7 @@ export default class TokenViewer extends View {
    * @param {number} now
    */
   row(t, row, now) {
-    const old = age(row, now);
+    const old = age(row, now, SOURCES[this.rows.codex.includes(row) ? "codex" : "quota"].staleMs);
     const missing = row.pending || Boolean(row.reason);
     return h_flex().id(`usage-${row.id}`).h(26).flex_none().gap(GAP).items_center().tooltip(tip(row, now))
       .child(h_flex().flex_1().min_w(0).gap(4).items_center()
