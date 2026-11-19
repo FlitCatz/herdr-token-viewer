@@ -1,16 +1,19 @@
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { checking, exec, theme } from "herdr";
-import { SOURCES, age, cell, pendingRows, tightest, tip } from "./usage.js";
+import { createFeed } from "./feed.js";
+import { SOURCES, age, cell, pendingRows, rail, tip } from "./usage.js";
 
 /** @typedef {import("gpui-kit").Context} Context */
 /** @typedef {import("gpui-kit").Color} Color */
 /** @typedef {import("./usage.js").Row} Row */
 
 // quota-axi asks each vendor on every read, and codex-multi-auth refreshes each Codex
-// account live on its own slower cadence; a copy keeps its timers while hidden, so the
-// refreshes stay slow. Countdowns and ages move by the minute between refreshes.
+// account live on its own slower cadence; copies in this app share one feed so multiple
+// views (visible or hidden) do not duplicate CLI invocations. Countdowns and ages move
+// by the minute between refreshes.
 const MINUTE_MS = 60000;
+const feed = createFeed({ exec, sources: SOURCES, initialRows: pendingRows, minuteMs: MINUTE_MS });
 
 // Below this width the sidebar is its folded rail and each row is one number.
 const RAIL_BELOW = 160;
@@ -26,42 +29,27 @@ export default class TokenViewer extends View {
    * @param {Context} cx
    */
   init(_props, cx) {
-    this.rows = pendingRows();
-    /** @type {Set<string>} sources with a read in flight */
-    this.reading = new Set();
     this.width = Infinity;
-    for (const [key, source] of Object.entries(SOURCES)) {
-      cx.timer.every(source.intervalMs, (cx) => this.refresh(cx, /** @type {keyof typeof SOURCES} */ (key)));
-    }
-    cx.timer.every(MINUTE_MS, (cx) => cx.notify());
+    /** @type {(() => void) | null} */
+    this.detach = null;
     // `herdr-app check` runs init() for real; it only proves the mod loads, so it must not
-    // start quota-axi or codex-multi-auth. The timers above never fire within a check.
+    // start quota-axi, codex-multi-auth, or shared background timers.
     if (!checking()) {
-      for (const key of /** @type {(keyof typeof SOURCES)[]} */ (Object.keys(SOURCES))) {
-        this.refresh(cx, key);
-      }
+      const handle = feed.attach({
+        every: (ms, fn) => cx.timer.every(ms, () => fn(), { owner: null }),
+        after: (ms, fn) => cx.timer.after(ms, () => fn(), { owner: null }),
+        spawn: (fn) => cx.spawn(() => fn(), { owner: null }),
+      });
+      this.detach = handle.detach;
+      cx.spawn(async (cx) => {
+        while (await handle.waitUpdate()) cx.notify();
+      });
     }
   }
 
-  /**
-   * @param {Context} cx
-   * @param {keyof typeof SOURCES} key
-   */
-  refresh(cx, key) {
-    if (this.reading.has(key)) return;
-    this.reading.add(key);
-    const source = SOURCES[key];
-    cx.spawn(async (cx) => {
-      // A program that is missing or hangs past the timeout leaves null, which the row
-      // rules turn into "unavailable" rows, as they do output they can't read. Nothing
-      // is kept from an earlier read to stand in for it.
-      /** @type {import("./usage.js").Ran} */
-      let ran = null;
-      try { ran = await exec(source.command, source.args, { timeout: source.timeoutMs }); } catch { /* stays null */ }
-      this.rows[key] = source.rows(ran);
-      this.reading.delete(key);
-      cx.notify();
-    });
+  close() {
+    this.detach?.();
+    this.detach = null;
   }
 
   /**
@@ -110,37 +98,44 @@ export default class TokenViewer extends View {
   }
 
   /**
-   * The folded sidebar: the row's initial (and Codex account number) and its tighter window.
+   * The folded sidebar: the row's initial (and Codex account number), its tighter window,
+   * and the reading's age when stale.
    * @param {Record<string, Color>} t
    * @param {Row} row
    * @param {number} now
+   * @param {number} staleMs the row's source's `staleMs`
    */
-  railRow(t, row, now) {
-    const tight = tightest(row, now);
-    const short = row.name[0] + (/\d+$/.exec(row.name)?.[0] ?? "");
-    return h_flex().id(`usage-${row.id}`).h(26).flex_none().gap(3).items_center().justify_center().text_size(10.5).tooltip(tip(row, now))
-      .child(div().text_color(t.dim).child(short))
-      .child(div().font_medium().text_color(this.color(t, tight.level)).child(tight.text));
+  railRow(t, row, now, staleMs) {
+    const r = rail(row, now, staleMs);
+    const line = h_flex().gap(3).items_center().justify_center().text_size(10.5)
+      .child(div().text_color(t.dim).child(r.short))
+      .child(div().font_medium().text_color(this.color(t, r.level)).child(r.text));
+    if (!r.age) {
+      return line.id(`usage-${row.id}`).h(26).flex_none().tooltip(tip(row, now));
+    }
+    return v_flex().id(`usage-${row.id}`).min_h(26).py(2).flex_none().gap(1).items_center().justify_center().tooltip(tip(row, now))
+      .child(line)
+      .child(div().text_size(9).text_color(t.dim).child(r.age));
   }
 
   render() {
     const t = /** @type {Record<string, Color>} */ (theme());
     const now = Date.now();
-    const [claude, fable, gemini, argon] = this.rows.quota.map((row) => ({ row, staleMs: SOURCES.quota.staleMs }));
-    const rows = [claude, fable, ...this.rows.codex.map((row) => ({ row, staleMs: SOURCES.codex.staleMs })), gemini, argon];
-    const rail = this.width < RAIL_BELOW;
+    const [claude, fable, gemini, argon] = feed.rows.quota.map((row) => ({ row, staleMs: SOURCES.quota.staleMs }));
+    const rows = [claude, fable, ...feed.rows.codex.map((row) => ({ row, staleMs: SOURCES.codex.staleMs })), gemini, argon];
+    const isRail = this.width < RAIL_BELOW;
     const head = (/** @type {string} */ label) => div().w(CELL_W).flex_none().text_size(10.5).text_color(t.dim).child(label);
     return v_flex().id("root").size_full().min_h(0).bg(t.chrome).border_t(1).border_color(t.border).text_size(12.5)
       .on_size_change((size, cx) => {
         this.width = size.width;
         cx.notify();
       })
-      .when(!rail, (el) => el.child(h_flex().id("usage-head").px(PAD).h(36).pt(12).pb(4).flex_none().gap(GAP).items_center()
+      .when(!isRail, (el) => el.child(h_flex().id("usage-head").px(PAD).h(36).pt(12).pb(4).flex_none().gap(GAP).items_center()
         .tooltip("Remaining usage per 5-hour and weekly window, with the time to each reset.")
         .child(div().flex_1().text_size(11.5).font_medium().text_color(t.dim).child("Usage"))
         .child(head("5h"))
         .child(head("Week"))))
-      .child(v_flex().id("usage-rows").flex_1().min_h(0).px(rail ? 0 : PAD).pt(rail ? 6 : 0).overflow_y_scrollbar()
-        .children(rows.map(({ row, staleMs }) => (rail ? this.railRow(t, row, now) : this.row(t, row, now, staleMs)))));
+      .child(v_flex().id("usage-rows").flex_1().min_h(0).px(isRail ? 0 : PAD).pt(isRail ? 6 : 0).overflow_y_scrollbar()
+        .children(rows.map(({ row, staleMs }) => (isRail ? this.railRow(t, row, now, staleMs) : this.row(t, row, now, staleMs)))));
   }
 }

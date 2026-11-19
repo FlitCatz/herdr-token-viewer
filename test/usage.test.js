@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   SOURCES,
-  age, cell, clock, codexRows, pendingRows, quotaRows, span, tightest, tip, unavailable,
+  age, cell, clock, codexRows, pendingRows, quotaRows, rail, span, tightest, tip, unavailable,
 } from "../mods/herdr-token-viewer/usage.js";
 
 const MIN = 60000;
@@ -235,6 +235,24 @@ test("tightest picks the smaller share for the folded sidebar", () => {
   // The weekly window reset since the reading, so only the 5-hour one still counts.
   assert.deepEqual(tightest({ ...row, weekly: { left: 5, resetAt: NOW + HOUR } }, NOW + 2 * HOUR), { text: "88%", level: "ok" });
   assert.deepEqual(tightest(unavailable("codex", "Codex", "x"), NOW), { text: "–", level: "none" });
+});
+
+test("rail keeps the reading's age on stale folded rows instead of showing them like fresh ones", () => {
+  const [staleCodex] = codexRows(ran(limits));
+  assert.deepEqual(rail(staleCodex, NOW, SOURCES.codex.staleMs), {
+    short: "C1", text: "5%", level: "low", age: "46m",
+  });
+  const freshCodex = { ...staleCodex, readAt: NOW - SOURCES.codex.intervalMs };
+  assert.deepEqual(rail(freshCodex, NOW, SOURCES.codex.staleMs), {
+    short: "C1", text: "5%", level: "low", age: null,
+  });
+  const unknownAgeClaude = { ...quotaRows(ran(quota))[0], readAt: null };
+  assert.deepEqual(rail(unknownAgeClaude, NOW, SOURCES.quota.staleMs), {
+    short: "C", text: "38%", level: "ok", age: "old",
+  });
+  assert.deepEqual(rail(unavailable("codex:1", "Codex 2", "no reading yet"), NOW, SOURCES.codex.staleMs), {
+    short: "C2", text: "–", level: "none", age: null,
+  });
 });
 
 test("quotaRows reads Argon's own 5-hour window when quota-axi reports it", () => {
