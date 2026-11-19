@@ -62,7 +62,25 @@ function makeHarness() {
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
   }
 
+  // A copy's scheduler stands for its init cx: once the copy is closed, using it throws.
+  function copyScheduler() {
+    let closed = false;
+    /** @param {string} name */
+    const guard = (name) => {
+      if (closed) throw new Error(`${name} on a closed copy's cx`);
+    };
+    return {
+      scheduler: {
+        every(ms, fn) { guard("every"); return scheduler.every(ms, fn); },
+        after(ms, fn) { guard("after"); return scheduler.after(ms, fn); },
+        spawn(fn) { guard("spawn"); return scheduler.spawn(fn); },
+      },
+      close() { closed = true; },
+    };
+  }
+
   return {
+    copyScheduler,
     now: () => time,
     setNow: (t) => { time = t; },
     timers,
@@ -124,7 +142,8 @@ test("a hidden copy and a visible copy share one periodic cadence without extra 
   const h = makeHarness();
   const feed = createFeed({ exec: h.exec, sources: SOURCES, initialRows: pendingRows, now: h.now });
 
-  const hidden = feed.attach(h.scheduler);
+  const hiddenCx = h.copyScheduler();
+  const hidden = feed.attach(hiddenCx.scheduler);
   await h.flush();
   assert.equal(h.calls.length, 2);
   h.calls[0].resolve({ code: 0, stdout: JSON.stringify(sampleQuota) });
@@ -133,7 +152,7 @@ test("a hidden copy and a visible copy share one periodic cadence without extra 
 
   // Second copy opens 30s later: reuses existing rows, triggers no extra CLI call.
   await h.advance(30_000);
-  const visible = feed.attach(h.scheduler);
+  const visible = feed.attach(h.copyScheduler().scheduler);
   await h.flush();
   assert.equal(h.calls.length, 2);
   assert.equal(feed.rows.quota[0].fiveHour?.left, 80);
@@ -145,15 +164,18 @@ test("a hidden copy and a visible copy share one periodic cadence without extra 
   h.calls[2].resolve({ code: 0, stdout: JSON.stringify(sampleQuota) });
   await h.flush();
 
-  // Detach the first copy; the second keeps the shared timers running up to 360s.
+  // Close the first copy, whose cx started the shared timers; the second copy takes them
+  // over on the same cadence up to 360s.
   hidden.detach();
+  hiddenCx.close();
   assert.equal(h.timers.filter((t) => !t.cancelled).length, 3);
   await h.advance(120_000);
   assert.equal(h.calls[3].command, "quota-axi");
   h.calls[3].resolve({ code: 0, stdout: JSON.stringify(sampleQuota) });
   await h.flush();
   await h.advance(120_000);
-  assert.deepEqual(h.calls.slice(3).map((c) => c.command), ["quota-axi", "quota-axi", "codex-multi-auth"]);
+  // Both are due at 360s; their order within that instant is not part of the cadence.
+  assert.deepEqual(h.calls.slice(3).map((c) => c.command).sort(), ["codex-multi-auth", "quota-axi", "quota-axi"]);
 
   visible.detach();
   assert.equal(h.timers.filter((t) => !t.cancelled).length, 0);
@@ -201,6 +223,31 @@ test("exec rejection becomes unavailable rows and releases the in-flight lock fo
   await h.advance(SOURCES.quota.intervalMs);
   assert.equal(h.calls.length, 3);
   assert.equal(h.calls[2].command, "quota-axi");
+
+  copy.detach();
+});
+
+test("a host spawn that throws releases the in-flight lock for the next round", async () => {
+  const h = makeHarness();
+  const feed = createFeed({ exec: h.exec, sources: SOURCES, initialRows: pendingRows, now: h.now });
+  let failNext = true;
+  const scheduler = {
+    ...h.scheduler,
+    spawn(fn) {
+      if (failNext) {
+        failNext = false;
+        throw new Error("spawn failed");
+      }
+      return h.scheduler.spawn(fn);
+    },
+  };
+
+  const copy = feed.attach(scheduler);
+  await h.flush();
+  assert.deepEqual(h.calls.map((c) => c.command), ["codex-multi-auth"]);
+
+  await h.advance(SOURCES.quota.intervalMs);
+  assert.deepEqual(h.calls.map((c) => c.command), ["codex-multi-auth", "quota-axi"]);
 
   copy.detach();
 });

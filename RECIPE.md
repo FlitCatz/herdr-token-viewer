@@ -93,9 +93,10 @@ shows only when one is reported.
     window with `windowMinutes` 300 (5-hour) and 10080 (weekly): `usedPercent` (shown as
     100 minus it) and `resetAtMs`. Read the windows whatever `status` says: a 429 entry
     is a rate-limited account with real windows, often an exhausted one.
-- `herdr`: `exec()`, `theme()`. gpui-kit: `cx.timer.every`, `cx.spawn`, `.tooltip()`,
-  `.on_size_change()` (its own width decides rail or full), `h_flex` / `v_flex` from
-  gpui-base.
+- `herdr`: `exec()`, `theme()`. gpui-kit: `cx.timer.every`, `cx.timer.after`, `cx.spawn`,
+  `{ owner: null }` on those (the shared poll outlives the copy that started it), the
+  view's `close()` (to leave the shared poll), `.tooltip()`, `.on_size_change()` (its own
+  width decides rail or full), `h_flex` / `v_flex` from gpui-base.
 - Network: only what `quota-axi` and `codex-multi-auth limits --refresh` do themselves
   (each asks its vendor for the quota; `limits --refresh` can also renew and save Codex
   login tokens). The mod reads no file and stores nothing: no shared state, no

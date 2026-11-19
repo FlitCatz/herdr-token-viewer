@@ -44,16 +44,20 @@ export function createFeed({ exec, sources, initialRows, now = Date.now, minuteM
   /** @type {Set<TimerTask>} */
   const tasks = new Set();
   /**
-   * @type {Set<{
+   * @typedef {{
+   *   scheduler: Scheduler,
    *   closed: boolean,
    *   dirty: boolean,
    *   resolve: ((alive: boolean) => void) | null,
    *   wake: () => void,
    *   waitUpdate: () => Promise<boolean>,
    *   close: () => void,
-   * }>}
+   * }} Listener
    */
+  /** @type {Set<Listener>} */
   const listeners = new Set();
+  /** @type {Listener | null} */
+  let driver = null;
 
   function notifyAll() {
     for (const listener of listeners) listener.wake();
@@ -68,14 +72,18 @@ export function createFeed({ exec, sources, initialRows, now = Date.now, minuteM
     inFlight.add(key);
     lastStartedAt.set(key, now());
     const source = sources[key];
-    spawn(async () => {
-      /** @type {Ran} */
-      let ran = null;
-      try { ran = await exec(source.command, source.args, { timeout: source.timeoutMs }); } catch { /* stays null */ }
-      rows[key] = source.rows(ran);
+    try {
+      spawn(async () => {
+        /** @type {Ran} */
+        let ran = null;
+        try { ran = await exec(source.command, source.args, { timeout: source.timeoutMs }); } catch { /* stays null */ }
+        rows[key] = source.rows(ran);
+        inFlight.delete(key);
+        notifyAll();
+      });
+    } catch {
       inFlight.delete(key);
-      notifyAll();
-    });
+    }
   }
 
   /** @param {Scheduler} scheduler */
@@ -107,7 +115,9 @@ export function createFeed({ exec, sources, initialRows, now = Date.now, minuteM
 
   /** @param {Scheduler} scheduler */
   function attach(scheduler) {
+    /** @type {Listener} */
     const listener = {
+      scheduler,
       closed: false,
       dirty: false,
       /** @type {((alive: boolean) => void) | null} */
@@ -143,13 +153,19 @@ export function createFeed({ exec, sources, initialRows, now = Date.now, minuteM
       },
     };
     listeners.add(listener);
-    if (listeners.size === 1) start(scheduler);
+    if (!driver) {
+      driver = listener;
+      start(scheduler);
+    }
     return {
       waitUpdate: () => listener.waitUpdate(),
       detach() {
         listener.close();
         listeners.delete(listener);
-        if (!listeners.size) stop();
+        if (listener !== driver) return;
+        stop();
+        driver = listeners.values().next().value ?? null;
+        if (driver) start(driver.scheduler);
       },
     };
   }
