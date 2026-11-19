@@ -29,7 +29,7 @@ Fable and Argon have limits of their own, so each has a row too.
 - It reads Claude and Gemini every 2 minutes, and Codex about every 6 minutes:
   codex-multi-auth skips an account read less than 5 minutes ago, and the extra minute
   keeps every account due on each run.
-- With the sidebar folded to its rail, each row is one number: the smaller of its two shares.
+- With the sidebar folded to its rail, each row shows the smaller of its two shares, plus its age underneath when stale.
 
 ### Where the numbers come from
 
@@ -72,7 +72,7 @@ The viewer starts with the window, because it is part of the layout.
 ## Develop
 
 Plain JavaScript, no build step. `mods/herdr-token-viewer/usage.js` holds the reading and
-wording rules as pure functions; `main.js` is the view.
+wording rules as pure functions; `feed.js` shares one poll across view copies; `main.js` is the view.
 
 ```sh
 node --test                                     # reading rules

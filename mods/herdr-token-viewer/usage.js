@@ -241,6 +241,20 @@ export function tightest(row, now) {
   return { text: c.percent, level: c.level };
 }
 
+/**
+ * One row of the folded sidebar: the short name, the tighter share, and the reading's
+ * age when stale.
+ * @param {Row} row
+ * @param {number} now
+ * @param {number} staleMs the row's source's `staleMs`
+ * @returns {{ short: string, text: string, level: Level, age: string | null }}
+ */
+export function rail(row, now, staleMs) {
+  const tight = tightest(row, now);
+  const short = row.name[0] + (/\d+$/.exec(row.name)?.[0] ?? "");
+  return { short, ...tight, age: age(row, now, staleMs) };
+}
+
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /**

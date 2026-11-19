@@ -39,6 +39,7 @@ shows only when one is reported.
 - Sidebar folded to its rail (the block narrower than 160 px): no heading; each row is
   centered, 10.5 px: the name's initial plus the account number (`C`, `F`, `C1`, `C2`,
   `C3`, `G`, `A`) in `dim`, then the smaller of the row's two shares in its level color, or `–`.
+  A stale reading shows its `age()` (`46m`, `old`, ...) in 9 px `dim` on a second line below.
 
 ## How it behaves
 
@@ -75,8 +76,9 @@ shows only when one is reported.
   `{ "id": "usage", "type": "block", "size": { "px": 226 }, "content": { "mod": "herdr-token-viewer" } }`.
   Height: 36 + 26 per row + 8 (seven rows with three Codex accounts). No `props`.
 - `mods/herdr-token-viewer/`: `mod.json` (`{ "place": "none", "title": "Usage" }`),
-  `main.js` (the view: timers, the two reads, rows), `usage.js` (pure rules: reports to
-  rows, rows to texts; no imports), `jsconfig.json` (`checkJs`, as Herdr writes it).
+  `main.js` (the view: rows and rail layout), `feed.js` (shared polling and timers across copies;
+  no Herdr imports), `usage.js` (pure rules: reports to rows, rows to texts; no imports),
+  `jsconfig.json` (`checkJs`, as Herdr writes it).
 - Programs, through `exec` with the person's own `PATH`:
   - `quota-axi --provider claude,agy --json --no-credential-refresh --max-age 60s`. From
     `providers[]`: `claude` windows `five_hour` and `seven_day` (Claude) and `model:fable`
@@ -91,13 +93,14 @@ shows only when one is reported.
     window with `windowMinutes` 300 (5-hour) and 10080 (weekly): `usedPercent` (shown as
     100 minus it) and `resetAtMs`. Read the windows whatever `status` says: a 429 entry
     is a rate-limited account with real windows, often an exhausted one.
-- `herdr`: `exec()`, `theme()`. gpui-kit: `cx.timer.every`, `cx.spawn`, `.tooltip()`,
-  `.on_size_change()` (its own width decides rail or full), `h_flex` / `v_flex` from
-  gpui-base.
+- `herdr`: `exec()`, `theme()`. gpui-kit: `cx.timer.every`, `cx.timer.after`, `cx.spawn`,
+  `{ owner: null }` on those (the shared poll outlives the copy that started it), the
+  view's `close()` (to leave the shared poll), `.tooltip()`, `.on_size_change()` (its own
+  width decides rail or full), `h_flex` / `v_flex` from gpui-base.
 - Network: only what `quota-axi` and `codex-multi-auth limits --refresh` do themselves
   (each asks its vendor for the quota; `limits --refresh` can also renew and save Codex
-  login tokens). The mod reads no file and stores nothing: no shared state, no
-  localStorage.
+  login tokens). The mod reads no file and persists nothing: beyond the in-memory feed
+  its copies share, no stored state, no localStorage.
 
 ## Watch out
 
@@ -119,8 +122,10 @@ shows only when one is reported.
   provider for the Gemini CLI.
 - Herdr started from Finder takes `PATH` from the login shell. A program only on an
   interactive shell's `PATH` isn't found, and its rows say unavailable.
-- Each Herdr window runs its own copy with its own timers; `--max-age 60s` lets copies
-  that read within a minute share one vendor read.
+- All copies of the mod in Herdr (visible or hidden) share one in-memory feed, timers, and
+  in-flight read per source. Across separate Herdr processes, `--max-age 60s` lets `quota-axi`
+  share one vendor read within a minute, and `codex-multi-auth` coordinates concurrent
+  token-refresh and cache writes with its own cross-process locks.
 - The block's height is fixed in the layout; with more Codex accounts than fit, the rows
   scroll. Change `px` by 26 per account (and per row added).
 - `theme()` is typed `Record<string, string>` but the color setters want `#rrggbb`: cast it
@@ -150,4 +155,4 @@ shows only when one is reported.
 - With neither program on `PATH`, the list is `Claude`, `Fable`, `Codex`, `Gemini`,
   `Argon`, each `unavailable`, and Herdr stays responsive.
 - `quota-axi` is run again 120 s after the last read and `codex-multi-auth` every 360 s, not sooner.
-- With the sidebar folded, each row is an initial and one number.
+- With the sidebar folded, each row is an initial and one number, plus its age underneath when stale.
