@@ -99,8 +99,8 @@ shows only when one is reported.
   width decides rail or full), `h_flex` / `v_flex` from gpui-base.
 - Network: only what `quota-axi` and `codex-multi-auth limits --refresh` do themselves
   (each asks its vendor for the quota; `limits --refresh` can also renew and save Codex
-  login tokens). The mod reads no file and stores nothing: no shared state, no
-  localStorage.
+  login tokens). The mod reads no file and persists nothing: beyond the in-memory feed
+  its copies share, no stored state, no localStorage.
 
 ## Watch out
 
