@@ -186,13 +186,22 @@ export function span(ms) {
  * reports a reset time at or before the reading, treat the reset time as undetermined rather
  * than dropping a newer share.
  * @param {number | null} resetAt
- * @param {number | null | undefined} readAt
+ * @param {number | null} readAt
  * @returns {number | null}
  */
 function validResetAt(resetAt, readAt) {
   if (resetAt === null) return null;
-  if (typeof readAt === "number" && resetAt <= readAt) return null;
+  if (readAt !== null && resetAt <= readAt) return null;
   return resetAt;
+}
+
+/**
+ * Whether the window has reset since it was read: the share read then says nothing now.
+ * @param {Win} win
+ * @param {number} now
+ */
+function passed(win, now) {
+  return win.resetAt !== null && win.resetAt <= now;
 }
 
 /** @param {number} left @returns {Level} */
@@ -205,16 +214,14 @@ function level(left) {
  * to draw the bar (null: no bar).
  * @param {Win | null} win
  * @param {number} now
- * @param {number | null} [readAt]
  * @returns {{ percent: string, reset: string, left: number | null, level: Level }}
  */
-export function cell(win, now, readAt = null) {
+export function cell(win, now) {
   if (!win) return { percent: "–", reset: "", left: null, level: "none" };
-  const resetAt = validResetAt(win.resetAt, readAt);
-  if (resetAt !== null && resetAt <= now) return { percent: "–", reset: "reset", left: null, level: "none" };
+  if (passed(win, now)) return { percent: "–", reset: "reset", left: null, level: "none" };
   return {
     percent: `${Math.round(win.left)}%`,
-    reset: resetAt === null ? "" : span(resetAt - now),
+    reset: win.resetAt === null ? "" : span(win.resetAt - now),
     left: win.left,
     level: level(win.left),
   };
@@ -243,7 +250,7 @@ export function age(row, now, staleMs) {
  * @returns {{ text: string, level: Level }}
  */
 export function tightest(row, now) {
-  const cells = [cell(row.fiveHour, now, row.readAt), cell(row.weekly, now, row.readAt)].filter((c) => c.left !== null);
+  const cells = [cell(row.fiveHour, now), cell(row.weekly, now)].filter((c) => c.left !== null);
   if (!cells.length) return { text: "–", level: "none" };
   const c = cells.reduce((a, b) => (b.left < a.left ? b : a));
   return { text: c.percent, level: c.level };
@@ -287,13 +294,12 @@ export function tip(row, now) {
   /** @type {(title: string, win: Win | null) => string} */
   const part = (title, win) => {
     if (!win) return `${title}: not reported`;
-    const resetAt = validResetAt(win.resetAt, row.readAt);
-    if (resetAt !== null && resetAt <= now) {
+    if (passed(win, now)) {
       return row.readAt === null
-        ? `${title}: reset ${clock(resetAt)}`
-        : `${title}: reset ${clock(resetAt)}, after this reading`;
+        ? `${title}: reset ${clock(win.resetAt)}`
+        : `${title}: reset ${clock(win.resetAt)}, after this reading`;
     }
-    return `${title}: ${Math.round(win.left)}% left` + (resetAt === null ? "" : `, resets ${clock(resetAt)}`);
+    return `${title}: ${Math.round(win.left)}% left` + (win.resetAt === null ? "" : `, resets ${clock(win.resetAt)}`);
   };
   const read = row.readAt === null ? " Read at an unknown time." : ` Read ${span(now - row.readAt)} ago.`;
   return `${who}. ${part("5-hour", row.fiveHour)}. ${part("Weekly", row.weekly)}.${read}`;

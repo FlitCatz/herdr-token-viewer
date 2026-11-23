@@ -67,10 +67,9 @@ export default class TokenViewer extends View {
    * @param {Record<string, Color>} t
    * @param {import("./usage.js").Win | null} win
    * @param {number} now
-   * @param {number | null} readAt
    */
-  cell(t, win, now, readAt) {
-    const c = cell(win, now, readAt);
+  cell(t, win, now) {
+    const c = cell(win, now);
     return v_flex().w(CELL_W).flex_none().gap(3)
       .child(h_flex().items_center().justify_between()
         .child(div().text_size(11.5).font_medium().text_color(this.color(t, c.level)).child(c.percent))
@@ -97,7 +96,7 @@ export default class TokenViewer extends View {
         .when(Boolean(old), (el) => el.child(div().flex_none().text_size(10.5).text_color(t.dim).child(old))))
       .when(missing, (el) => el.child(div().w(CELL_W * 2 + GAP).flex_none().text_size(11.5).text_color(t.dim)
         .child(row.pending ? "reading…" : "unavailable")))
-      .when(!missing, (el) => el.child(this.cell(t, row.fiveHour, now, row.readAt)).child(this.cell(t, row.weekly, now, row.readAt)));
+      .when(!missing, (el) => el.child(this.cell(t, row.fiveHour, now)).child(this.cell(t, row.weekly, now)));
   }
 
   /**
