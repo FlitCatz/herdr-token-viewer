@@ -36,7 +36,7 @@ shows only when one is reported.
 - A row without a reading: the name, then `unavailable` (11.5 px, `dim`) across both
   cells. Before the first read comes back: `Claude`, `Fable`, `Codex`, `Gemini`, `Argon`,
   each `reading…`.
-- Sidebar folded to its rail (the block narrower than 160 px): no heading; each row is
+- Sidebar folded to its rail (the block narrower than 260 px): no heading; each row is
   centered, 10.5 px: the name's initial plus the account number (`C`, `F`, `C1`, `C2`,
   `C3`, `G`, `A`) in `dim`, then the smaller of the row's two shares in its level color, or `–`.
   A stale reading shows its `age()` (`46m`, `old`, ...) in 9 px `dim` on a second line below.
@@ -149,7 +149,7 @@ shows only when one is reported.
 - A share under 25% is in the `working` color, under 10% in `blocked`, bar included.
 - The Codex account codex-multi-auth marks `current` has the dot; a Codex row read 46
   minutes ago shows `46m` beside its name.
-- A Codex row whose `resetAtMs` is in the past shows `–` and `reset`, not its old share.
+- A Codex row whose `resetAtMs` is after its reading and in the past shows `–` and `reset`, not its old share; a `resetAtMs` at or before `updatedAt` keeps the share with no reset time.
 - With quota-axi reporting `agy` as `auth_required`, the Gemini row says `unavailable`
   while Claude and Codex still show numbers.
 - With neither program on `PATH`, the list is `Claude`, `Fable`, `Codex`, `Gemini`,

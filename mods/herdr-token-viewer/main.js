@@ -15,13 +15,15 @@ import { SOURCES, age, cell, pendingRows, rail, tip } from "./usage.js";
 const MINUTE_MS = 60000;
 const feed = createFeed({ exec, sources: SOURCES, initialRows: pendingRows, minuteMs: MINUTE_MS });
 
-// Below this width the sidebar is its folded rail and each row is one number.
-const RAIL_BELOW = 160;
 // Sized so "Codex 3", its in-use dot and a two-digit age fit beside both windows at the
 // sidebar's usual 268 px.
 const CELL_W = 68;
 const GAP = 6;
 const PAD = 14;
+// Minimum width kept for the row name (plus in-use dot and stale age) before folding to the rail.
+const MIN_NAME_W = 84;
+// Below this width the sidebar folds to its rail so fixed columns never crowd out the name.
+const RAIL_BELOW = PAD * 2 + CELL_W * 2 + GAP * 2 + MIN_NAME_W;
 
 export default class TokenViewer extends View {
   /**
