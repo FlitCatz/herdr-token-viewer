@@ -140,7 +140,7 @@ test("codexRows lists every account in order, with what is left of each window",
   assert.deepEqual(rows.map((r) => r.name), ["Codex 1", "Codex 2", "Codex 3"]);
   assert.deepEqual(rows.map((r) => r.current), [false, false, true]);
   assert.deepEqual(rows[0], {
-    id: "codex:Account 1 (Example Team [id:ab12c0], ex***@***.com, id:ab12c0)", name: "Codex 1",
+    id: "codex:0", name: "Codex 1",
     label: "Account 1 (Example Team [id:ab12c0], ex***@***.com, id:ab12c0)", current: false, enabled: true,
     plan: "team", readAt: NOW - 46 * MIN,
     fiveHour: { left: 88, resetAt: NOW + 4 * HOUR + 14 * MIN },
@@ -190,6 +190,25 @@ test("codexRows falls back to the account's place when it has no label or index"
   assert.equal(row.name, "Codex 1");
 });
 
+test("codexRows gives distinct ids even when accounts share a masked label or index", () => {
+  const sameLabel = "Account (ex***@***.com)";
+  const rows = codexRows(ran({
+    accounts: [
+      account(0, { label: sameLabel }),
+      account(1, { label: sameLabel }),
+      account(1, { label: sameLabel }),
+      { label: sameLabel, quota: account(0).quota },
+    ],
+  }));
+  const ids = rows.map((r) => r.id);
+  assert.equal(new Set(ids).size, 4);
+  assert.deepEqual(ids, ["codex:0", "codex:1", "codex:2", "codex:3"]);
+  // The masked label stays display-only (used in the tooltip).
+  assert.ok(rows.every((r) => r.label === sameLabel));
+  assert.match(tip(rows[0], NOW), /^Account \(ex\*\*\*@\*\*\*\.com\)/);
+  assert.match(tip(rows[1], NOW), /^Account \(ex\*\*\*@\*\*\*\.com\)/);
+});
+
 test("span is short at every size", () => {
   assert.equal(span(-5), "<1m");
   assert.equal(span(59999), "<1m");
@@ -212,6 +231,53 @@ test("cell shows the share left, the time to the reset and a level", () => {
 test("cell drops a share that was read before its window reset", () => {
   assert.deepEqual(cell({ left: 5, resetAt: NOW - MIN }, NOW), { percent: "–", reset: "reset", left: null, level: "none" });
   assert.deepEqual(cell({ left: 5, resetAt: NOW }, NOW), { percent: "–", reset: "reset", left: null, level: "none" });
+});
+
+test("conflicting resetAt at or before readAt keeps the share and leaves only the reset time unknown", () => {
+  // Codex reading taken 1s after the reported resetAtMs with 80% remaining.
+  const lagged = account(0, {
+    quota: {
+      updatedAt: NOW, status: 200, planType: "team",
+      primary: { usedPercent: 20, windowMinutes: 300, resetAtMs: NOW - 1000 },
+      secondary: { usedPercent: 10, windowMinutes: 10080, resetAtMs: NOW + 24 * HOUR },
+    },
+  });
+  const [codexRow] = codexRows(ran({ accounts: [lagged] }));
+  assert.deepEqual(codexRow.fiveHour, { left: 80, resetAt: null });
+  assert.deepEqual(cell(codexRow.fiveHour, NOW, codexRow.readAt), { percent: "80%", reset: "", left: 80, level: "ok" });
+  assert.deepEqual(tightest(codexRow, NOW), { text: "80%", level: "ok" });
+  assert.match(tip(codexRow, NOW), /5-hour: 80% left\./);
+  assert.doesNotMatch(tip(codexRow, NOW), /after this reading/);
+
+  // quota-axi fresh reading whose resetsAt is equal to or earlier than generatedAt.
+  const qReport = structuredClone(quota);
+  qReport.providers[0].windows[0] = { id: "five_hour", kind: "session", percentRemaining: 75, resetsAt: "2026-11-12T01:30:00.000Z" };
+  const [claudeRow] = quotaRows(ran(qReport));
+  assert.deepEqual(claudeRow.fiveHour, { left: 75, resetAt: null });
+  assert.deepEqual(cell(claudeRow.fiveHour, NOW, claudeRow.readAt), { percent: "75%", reset: "", left: 75, level: "ok" });
+
+  // Direct cell/tightest/tip calls with a raw window whose resetAt <= readAt also preserve the share.
+  assert.deepEqual(cell({ left: 80, resetAt: NOW - 1000 }, NOW, NOW), { percent: "80%", reset: "", left: 80, level: "ok" });
+  assert.deepEqual(cell({ left: 80, resetAt: NOW }, NOW, NOW), { percent: "80%", reset: "", left: 80, level: "ok" });
+  const rawRow = {
+    id: "codex:0", name: "Codex 1", readAt: NOW,
+    fiveHour: { left: 80, resetAt: NOW - 1000 }, weekly: null,
+  };
+  assert.deepEqual(tightest(rawRow, NOW), { text: "80%", level: "ok" });
+  assert.equal(tip(rawRow, NOW), "Codex 1. 5-hour: 80% left. Weekly: not reported. Read <1m ago.");
+
+  // A reading genuinely taken before resetAt still drops to reset once now >= resetAt.
+  assert.deepEqual(cell({ left: 5, resetAt: NOW - MIN }, NOW, NOW - 2 * MIN), { percent: "–", reset: "reset", left: null, level: "none" });
+  assert.deepEqual(cell({ left: 5, resetAt: NOW }, NOW, NOW - MIN), { percent: "–", reset: "reset", left: null, level: "none" });
+
+  // An unknown readAt still drops an already-past resetAt without falsely claiming "after this reading".
+  const stalePast = {
+    id: "claude", name: "Claude", readAt: null,
+    fiveHour: { left: 5, resetAt: new Date(2026, 10, 12, 9, 30).getTime() }, weekly: null,
+  };
+  const later = new Date(2026, 10, 12, 10, 30).getTime();
+  assert.deepEqual(cell(stalePast.fiveHour, later, stalePast.readAt), { percent: "–", reset: "reset", left: null, level: "none" });
+  assert.equal(tip(stalePast, later), "Claude. 5-hour: reset Thu 09:30. Weekly: not reported. Read at an unknown time.");
 });
 
 test("age speaks up only once a reading is older than its source's refresh", () => {

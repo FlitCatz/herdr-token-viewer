@@ -117,27 +117,27 @@ export function quotaRows(ran) {
     if (status !== "fresh" && status !== "stale") {
       return unavailable(r.id, r.name, STATE_REASONS[/** @type {keyof typeof STATE_REASONS} */ (status)] ?? "no reading available");
     }
+    // A reused reading says when it was taken; a fresh one was taken just now. A stale one
+    // without its time is of unknown age, not new.
+    const readAt = time(p.state?.refreshedAt) ?? (status === "fresh" ? generatedAt : null);
     const windows = Array.isArray(p.windows) ? p.windows : [];
     /** @type {(id: string) => Win | null} */
     const win = (id) => {
       const w = windows.find((/** @type {any} */ x) => x?.id === id);
       const left = num(w?.percentRemaining);
-      return left === null ? null : { left: clamp(left), resetAt: time(w.resetsAt) };
+      return left === null ? null : { left: clamp(left), resetAt: validResetAt(time(w.resetsAt), readAt) };
     };
     const fiveHour = r.fiveHour ? win(r.fiveHour) : null;
     const weekly = win(r.weekly);
     if (!fiveHour && !weekly) return unavailable(r.id, r.name, r.fiveHour ? "no 5-hour or weekly window reported" : "no weekly window reported");
-    // A reused reading says when it was taken; a fresh one was taken just now. A stale one
-    // without its time is of unknown age, not new.
-    const readAt = time(p.state?.refreshedAt) ?? (status === "fresh" ? generatedAt : null);
     return { id: r.id, name: r.name, fiveHour, weekly, readAt, plan: typeof p.plan === "string" ? p.plan : undefined };
   });
 }
 
 /**
- * One row per Codex account from `codex-multi-auth limits --json --refresh`, in its order. The
- * account's masked label is its identity, so a row keeps its place in the list while the
- * accounts rotate.
+ * One row per Codex account from `codex-multi-auth limits --json --refresh`, in its order. Each
+ * row's id uses its position in the response so accounts with matching masked labels never
+ * collide; the masked label is kept for display only.
  * @param {Ran} ran
  * @returns {Row[]}
  */
@@ -149,21 +149,22 @@ export function codexRows(ran) {
   return accounts.map((/** @type {any} */ a, /** @type {number} */ i) => {
     const index = num(a?.index) ?? i;
     const label = typeof a?.label === "string" && a.label ? a.label : undefined;
-    const id = `codex:${label ?? index}`;
+    const id = `codex:${i}`;
     const name = `Codex ${index + 1}`;
     const about = { label, current: a?.current === true, enabled: a?.enabled !== false };
     const q = a?.quota;
     if (!q) return { ...unavailable(id, name, "no reading yet"), ...about };
+    const readAt = num(q.updatedAt);
     /** @type {(minutes: number) => Win | null} */
     const win = (minutes) => {
       const w = [q.primary, q.secondary].find((x) => num(x?.windowMinutes) === minutes);
       const used = num(w?.usedPercent);
-      return used === null ? null : { left: clamp(100 - used), resetAt: num(w.resetAtMs) };
+      return used === null ? null : { left: clamp(100 - used), resetAt: validResetAt(num(w.resetAtMs), readAt) };
     };
     const fiveHour = win(FIVE_HOURS_MIN);
     const weekly = win(WEEK_MIN);
     if (!fiveHour && !weekly) return { ...unavailable(id, name, "no 5-hour or weekly window reported"), ...about };
-    return { id, name, fiveHour, weekly, readAt: num(q.updatedAt), plan: typeof q.planType === "string" ? q.planType : undefined, ...about };
+    return { id, name, fiveHour, weekly, readAt, plan: typeof q.planType === "string" ? q.planType : undefined, ...about };
   });
 }
 
@@ -181,12 +182,17 @@ export function span(ms) {
 }
 
 /**
- * Whether the window has reset since it was read: the share read then says nothing now.
- * @param {Win} win
- * @param {number} now
+ * A window's reset time only applies when it falls after the reading; if an upstream source
+ * reports a reset time at or before the reading, treat the reset time as undetermined rather
+ * than dropping a newer share.
+ * @param {number | null} resetAt
+ * @param {number | null | undefined} readAt
+ * @returns {number | null}
  */
-function passed(win, now) {
-  return win.resetAt !== null && win.resetAt <= now;
+function validResetAt(resetAt, readAt) {
+  if (resetAt === null) return null;
+  if (typeof readAt === "number" && resetAt <= readAt) return null;
+  return resetAt;
 }
 
 /** @param {number} left @returns {Level} */
@@ -199,14 +205,16 @@ function level(left) {
  * to draw the bar (null: no bar).
  * @param {Win | null} win
  * @param {number} now
+ * @param {number | null} [readAt]
  * @returns {{ percent: string, reset: string, left: number | null, level: Level }}
  */
-export function cell(win, now) {
+export function cell(win, now, readAt = null) {
   if (!win) return { percent: "–", reset: "", left: null, level: "none" };
-  if (passed(win, now)) return { percent: "–", reset: "reset", left: null, level: "none" };
+  const resetAt = validResetAt(win.resetAt, readAt);
+  if (resetAt !== null && resetAt <= now) return { percent: "–", reset: "reset", left: null, level: "none" };
   return {
     percent: `${Math.round(win.left)}%`,
-    reset: win.resetAt === null ? "" : span(win.resetAt - now),
+    reset: resetAt === null ? "" : span(resetAt - now),
     left: win.left,
     level: level(win.left),
   };
@@ -235,7 +243,7 @@ export function age(row, now, staleMs) {
  * @returns {{ text: string, level: Level }}
  */
 export function tightest(row, now) {
-  const cells = [cell(row.fiveHour, now), cell(row.weekly, now)].filter((c) => c.left !== null);
+  const cells = [cell(row.fiveHour, now, row.readAt), cell(row.weekly, now, row.readAt)].filter((c) => c.left !== null);
   if (!cells.length) return { text: "–", level: "none" };
   const c = cells.reduce((a, b) => (b.left < a.left ? b : a));
   return { text: c.percent, level: c.level };
@@ -279,8 +287,13 @@ export function tip(row, now) {
   /** @type {(title: string, win: Win | null) => string} */
   const part = (title, win) => {
     if (!win) return `${title}: not reported`;
-    if (passed(win, now)) return `${title}: reset ${clock(win.resetAt)}, after this reading`;
-    return `${title}: ${Math.round(win.left)}% left` + (win.resetAt === null ? "" : `, resets ${clock(win.resetAt)}`);
+    const resetAt = validResetAt(win.resetAt, row.readAt);
+    if (resetAt !== null && resetAt <= now) {
+      return row.readAt === null
+        ? `${title}: reset ${clock(resetAt)}`
+        : `${title}: reset ${clock(resetAt)}, after this reading`;
+    }
+    return `${title}: ${Math.round(win.left)}% left` + (resetAt === null ? "" : `, resets ${clock(resetAt)}`);
   };
   const read = row.readAt === null ? " Read at an unknown time." : ` Read ${span(now - row.readAt)} ago.`;
   return `${who}. ${part("5-hour", row.fiveHour)}. ${part("Weekly", row.weekly)}.${read}`;
