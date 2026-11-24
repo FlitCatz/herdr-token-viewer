@@ -123,8 +123,8 @@ export default class TokenViewer extends View {
   render() {
     const t = /** @type {Record<string, Color>} */ (theme());
     const now = Date.now();
-    const [claude, fable, gemini, argon] = feed.rows.quota.map((row) => ({ row, staleMs: SOURCES.quota.staleMs }));
-    const rows = [claude, fable, ...feed.rows.codex.map((row) => ({ row, staleMs: SOURCES.codex.staleMs })), gemini, argon];
+    const [claude, fable, gemini] = feed.rows.quota.map((row) => ({ row, staleMs: SOURCES.quota.staleMs }));
+    const rows = [claude, fable, ...feed.rows.codex.map((row) => ({ row, staleMs: SOURCES.codex.staleMs })), gemini];
     const isRail = this.width < RAIL_BELOW;
     const head = (/** @type {string} */ label) => div().w(CELL_W).flex_none().text_size(10.5).text_color(t.dim).child(label);
     return v_flex().id("root").size_full().min_h(0).bg(t.chrome).border_t(1).border_color(t.border).text_size(12.5)

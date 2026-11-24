@@ -221,7 +221,7 @@ test("full mode only turns on when fixed columns and minimum name width fit insi
 
   /** @param {number} width */
   const renderAt = (width) => {
-    onSizeChange({ width, height: 226 }, cx);
+    onSizeChange({ width, height: 200 }, cx);
     return view.render();
   };
 
@@ -243,7 +243,10 @@ test("full mode only turns on when fixed columns and minimum name width fit insi
     assert.ok(wide - headFixed >= 84, `header fixed width ${headFixed} leaves < 84px at ${wide}px`);
 
     const rowsEl = findById(tree, "usage-rows");
-    assert.ok(rowsEl.items.length > 0);
+    assert.deepEqual(
+      rowsEl.items.map((/** @type {any} */ el) => el.props.id),
+      ["usage-claude", "usage-fable", "usage-codex:0", "usage-gemini"],
+    );
     for (const rowEl of rowsEl.items) {
       const rowFixed = fixedRowWidth(rowEl, rowsEl.props.px);
       assert.ok(wide - rowFixed >= 84, `row ${rowEl.props.id} fixed width ${rowFixed} leaves < 84px at ${wide}px`);
@@ -287,7 +290,7 @@ test("two Codex accounts with identical masked labels render with unique element
 
   const onSizeChange = view.render().props.on_size_change;
   for (const width of [268, 165]) {
-    onSizeChange({ width, height: 226 }, cx);
+    onSizeChange({ width, height: 200 }, cx);
     const rowsEl = findById(view.render(), "usage-rows");
     const ids = rowsEl.items.map((/** @type {any} */ el) => el.props.id);
     assert.equal(new Set(ids).size, ids.length, `duplicate row ids at ${width}px: ${ids.join(", ")}`);
