@@ -88,6 +88,102 @@ test("quotaRows doesn't date a stale reading without its time as new", () => {
   assert.match(tip(claude, NOW), /Read at an unknown time\.$/);
 });
 
+test("quotaRows keeps a live agy reading current when quota-axi --full --json marks it stale", () => {
+  const report = structuredClone(quota);
+  report.providers[1] = {
+    provider: "agy",
+    source: "cli",
+    accountKeys: ["default"],
+    attempts: [{ source: "cli", status: "success" }],
+    state: { status: "stale", stale: true, refreshedAt: "2026-11-12T01:29:59.000Z", sourcesTried: ["cli"] },
+    windows: [
+      { id: "gemini_5h", kind: "session", percentRemaining: 81, resetsAt: "2026-11-12T05:14:32.000Z" },
+      { id: "gemini_weekly", kind: "weekly", percentRemaining: 19, resetsAt: "2026-11-17T01:53:10.000Z" },
+      { id: "claude_gpt_5h", kind: "session", percentRemaining: 100, resetsAt: "1970-01-01T00:00:00.000Z" },
+      { id: "claude_gpt_weekly", kind: "weekly", percentRemaining: 100, resetsAt: "1970-01-01T00:00:00.000Z" },
+    ],
+  };
+  const [claude, fable, gemini] = quotaRows(ran(report));
+  assert.equal(gemini.readAt, NOW - 1000);
+  assert.equal(age(gemini, NOW, SOURCES.quota.staleMs), null);
+  assert.match(tip(gemini, NOW), /Read <1m ago\.$/);
+  // Unaffected providers keep their readings and timestamps.
+  assert.equal(claude.readAt, NOW);
+  assert.equal(fable.readAt, NOW);
+});
+
+test("quotaRows falls back to generatedAt on stale only when positively proved a current live read", () => {
+  const report = structuredClone(quota);
+  report.providers[1] = {
+    provider: "agy",
+    source: "cli-rpc",
+    accountKeys: ["default"],
+    attempts: [{ source: "cli", status: "skipped", error: "agy CLI is not installed" }, { source: "loopback", status: "success" }],
+    state: { status: "stale", stale: true, sourcesTried: ["cli", "loopback"] },
+    windows: [
+      { id: "gemini_5h", kind: "session", percentRemaining: 81, resetsAt: "2026-11-12T05:14:32.000Z" },
+      { id: "gemini_weekly", kind: "weekly", percentRemaining: 19, resetsAt: "2026-11-17T01:53:10.000Z" },
+    ],
+  };
+  const [, , gemini] = quotaRows(ran(report));
+  assert.equal(gemini.readAt, NOW);
+  assert.equal(age(gemini, NOW, SOURCES.quota.staleMs), null);
+});
+
+test("quotaRows preserves cached age or unknown 'old' on failed, cached, or reused stale reads", () => {
+  const cachedWithTime = structuredClone(quota);
+  cachedWithTime.providers[1] = {
+    provider: "agy",
+    source: "cache",
+    attempts: [{ source: "cli", status: "failed", error: "timeout" }, { source: "loopback", status: "failed", error: "no endpoint" }],
+    state: {
+      status: "stale",
+      stale: true,
+      refreshedAt: new Date(NOW - 46 * MIN).toISOString(),
+      error: "timeout",
+      sourcesTried: ["cli", "loopback", "cache"],
+    },
+    windows: [
+      { id: "gemini_5h", kind: "session", percentRemaining: 81, resetsAt: "2026-11-12T05:14:32.000Z" },
+      { id: "gemini_weekly", kind: "weekly", percentRemaining: 19, resetsAt: "2026-11-17T01:53:10.000Z" },
+    ],
+  };
+  const [, , cachedGemini] = quotaRows(ran(cachedWithTime));
+  assert.equal(cachedGemini.readAt, NOW - 46 * MIN);
+  assert.equal(age(cachedGemini, NOW, SOURCES.quota.staleMs), "46m");
+  assert.match(tip(cachedGemini, NOW), /Read 46m ago\.$/);
+
+  // Untimed cached fallback stays "old" even if a helper attempt (e.g. credential refresh) succeeded.
+  const untimedCached = structuredClone(quota);
+  untimedCached.providers[0] = {
+    provider: "claude",
+    source: "cache",
+    attempts: [{ source: "claude-cli-refresh", status: "success" }, { source: "oauth-profile", status: "failed", error: "rate_limited" }],
+    state: { status: "stale", stale: true, error: "rate_limited", sourcesTried: ["oauth-profile", "cache"] },
+    windows: [
+      { id: "five_hour", kind: "session", percentRemaining: 84, resetsAt: "2026-11-12T05:10:00.000Z" },
+    ],
+  };
+  const [untimedClaude] = quotaRows(ran(untimedCached));
+  assert.equal(untimedClaude.readAt, null);
+  assert.equal(age(untimedClaude, NOW, SOURCES.quota.staleMs), "old");
+
+  // Reused stale reading without refreshedAt never falls back to generatedAt.
+  const untimedReused = structuredClone(quota);
+  untimedReused.providers[1] = {
+    provider: "agy",
+    source: "cli",
+    attempts: [{ source: "cli", status: "success" }],
+    state: { status: "stale", stale: true, reused: true },
+    windows: [
+      { id: "gemini_5h", kind: "session", percentRemaining: 81, resetsAt: "2026-11-12T05:14:32.000Z" },
+    ],
+  };
+  const [, , reusedGemini] = quotaRows(ran(untimedReused));
+  assert.equal(reusedGemini.readAt, null);
+  assert.equal(age(reusedGemini, NOW, SOURCES.quota.staleMs), "old");
+});
+
 test("quotaRows says unavailable, with the reason, instead of guessing", () => {
   const reasons = (/** @type {import("../mods/herdr-token-viewer/usage.js").Ran} */ r) => quotaRows(r).map((row) => row.reason);
   assert.deepEqual(reasons(null), Array(3).fill("quota-axi could not be run"));
@@ -349,6 +445,8 @@ test("SOURCES reads Codex live past codex-multi-auth's 5-minute gate, quota with
   // codex-multi-auth's `limits --refresh` skips an account read less than 5 minutes ago.
   assert.ok(SOURCES.codex.intervalMs > 5 * MIN);
   assert.ok(SOURCES.codex.args.includes("--refresh"));
+  assert.ok(SOURCES.quota.args.includes("--full"));
+  assert.ok(SOURCES.quota.args.includes("--json"));
   assert.ok(SOURCES.quota.args.includes("--no-credential-refresh"));
   for (const [key, source] of Object.entries(SOURCES)) {
     // A row waiting for its next refresh shows no age, and a read ends before the next is due.

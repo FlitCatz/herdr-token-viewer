@@ -99,7 +99,23 @@ function failure(program, ran) {
 }
 
 /**
- * Claude, Fable and Gemini rows from `quota-axi --provider claude,agy --json`.
+ * Whether a provider payload positively proves a current live read succeeded, distinct from a
+ * cached fallback, reused snapshot, or redacted `--json` payload without provenance.
+ * @param {any} p
+ * @returns {boolean}
+ */
+function isCurrentSuccessfulRead(p) {
+  if (p.state?.reused === true || p.state?.error) return false;
+  const source = typeof p.source === "string" ? p.source : null;
+  if (!source || source === "cache" || source === "unavailable") return false;
+  if (Array.isArray(p.state?.sourcesTried) && p.state.sourcesTried.includes("cache")) return false;
+  if (!Array.isArray(p.attempts)) return false;
+  return p.attempts.some((/** @type {any} */ a) =>
+    a?.status === "success" && (a?.source === source || (source === "cli-rpc" && a?.source === "loopback")));
+}
+
+/**
+ * Claude, Fable and Gemini rows from `quota-axi --provider claude,agy --full --json`.
  * @param {Ran} ran
  * @returns {Row[]}
  */
@@ -115,9 +131,10 @@ export function quotaRows(ran) {
     if (status !== "fresh" && status !== "stale") {
       return unavailable(r.id, r.name, STATE_REASONS[/** @type {keyof typeof STATE_REASONS} */ (status)] ?? "no reading available");
     }
-    // A reused reading says when it was taken; a fresh one was taken just now. A stale one
-    // without its time is of unknown age, not new.
-    const readAt = time(p.state?.refreshedAt) ?? (status === "fresh" ? generatedAt : null);
+    // A reading's own time is authoritative; without it, fall back to report time only for a
+    // fresh reading or a positively proven current live read. Cached or untimed stale readings
+    // without a timestamp stay of unknown age ("old").
+    const readAt = time(p.state?.refreshedAt) ?? (status === "fresh" || isCurrentSuccessfulRead(p) ? generatedAt : null);
     const windows = Array.isArray(p.windows) ? p.windows : [];
     /** @type {(id: string) => Win | null} */
     const win = (id) => {
@@ -314,8 +331,9 @@ export function tip(row, now) {
 export const SOURCES = {
   quota: {
     command: QUOTA_AXI,
-    // --max-age lets several windows share one vendor read.
-    args: ["--provider", "claude,agy", "--json", "--no-credential-refresh", "--max-age", "60s"],
+    // --full preserves state.refreshedAt, source, and attempts so live agy reads marked stale
+    // for unrelated expired windows keep their fetch time; --max-age lets windows share a read.
+    args: ["--provider", "claude,agy", "--full", "--json", "--no-credential-refresh", "--max-age", "60s"],
     intervalMs: 120000,
     staleMs: 180000,
     timeoutMs: 30000,
