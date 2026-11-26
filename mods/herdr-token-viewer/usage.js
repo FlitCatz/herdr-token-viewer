@@ -99,7 +99,7 @@ function failure(program, ran) {
 }
 
 /**
- * Claude, Fable and Gemini rows from `quota-axi --provider claude,agy --json`.
+ * Claude, Fable and Gemini rows from `quota-axi --provider claude,agy --full --json`.
  * @param {Ran} ran
  * @returns {Row[]}
  */
@@ -115,9 +115,11 @@ export function quotaRows(ran) {
     if (status !== "fresh" && status !== "stale") {
       return unavailable(r.id, r.name, STATE_REASONS[/** @type {keyof typeof STATE_REASONS} */ (status)] ?? "no reading available");
     }
-    // A reused reading says when it was taken; a fresh one was taken just now. A stale one
-    // without its time is of unknown age, not new.
-    const readAt = time(p.state?.refreshedAt) ?? (status === "fresh" ? generatedAt : null);
+    // Gemini keeps its reading's own time, since agy marks a live read stale when an unrelated
+    // window has expired. Claude and Fable keep it only for a reused reading, as plain `--json`
+    // shows it. A fresh reading without it was taken just now; a stale one is of unknown age.
+    const ownTime = r.provider === "agy" || p.state?.reused ? time(p.state?.refreshedAt) : null;
+    const readAt = ownTime ?? (status === "fresh" ? generatedAt : null);
     const windows = Array.isArray(p.windows) ? p.windows : [];
     /** @type {(id: string) => Win | null} */
     const win = (id) => {
@@ -314,8 +316,9 @@ export function tip(row, now) {
 export const SOURCES = {
   quota: {
     command: QUOTA_AXI,
-    // --max-age lets several windows share one vendor read.
-    args: ["--provider", "claude,agy", "--json", "--no-credential-refresh", "--max-age", "60s"],
+    // --full keeps agy's state.refreshedAt, so a live read marked stale keeps its time;
+    // --max-age lets windows share a read.
+    args: ["--provider", "claude,agy", "--full", "--json", "--no-credential-refresh", "--max-age", "60s"],
     intervalMs: 120000,
     staleMs: 180000,
     timeoutMs: 30000,

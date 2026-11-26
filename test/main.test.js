@@ -343,3 +343,97 @@ test("view keeps the percentage when a Codex reading was taken after its reporte
 
   view.close();
 });
+
+test("view omits 'old' on a current agy reading marked stale and keeps 'old' on an untimed stale fallback", async () => {
+  const now = Date.now();
+  const HOUR = 3600000;
+  let untimed = false;
+  // A full report shaped like quota-axi 0.1.69 `--full --json`: a live agy read is marked
+  // stale when an unrelated claude_gpt window reports an epoch reset.
+  const fullReport = () => ({
+    generatedAt: new Date(now).toISOString(),
+    providers: [
+      {
+        provider: "claude", plan: "max", source: "oauth",
+        attempts: [{ source: "oauth", status: "success" }],
+        state: { status: "fresh", stale: false, refreshedAt: new Date(now - 1000).toISOString(), sourcesTried: ["oauth"] },
+        windows: [
+          { id: "five_hour", percentRemaining: 84, resetsAt: new Date(now + 3 * HOUR).toISOString() },
+          { id: "seven_day", percentRemaining: 38, resetsAt: new Date(now + 30 * HOUR).toISOString() },
+          { id: "model:fable", percentRemaining: 77, resetsAt: new Date(now + 30 * HOUR).toISOString() },
+        ],
+      },
+      untimed
+        ? {
+          provider: "agy",
+          source: "cache",
+          attempts: [{ source: "cli", status: "failed", error: "timeout" }],
+          state: { status: "stale", stale: true, error: "timeout", sourcesTried: ["cli", "cache"] },
+          windows: [
+            { id: "gemini_5h", percentRemaining: 81, resetsAt: new Date(now + 4 * HOUR).toISOString() },
+            { id: "gemini_weekly", percentRemaining: 19, resetsAt: new Date(now + 120 * HOUR).toISOString() },
+          ],
+        }
+        : {
+          provider: "agy",
+          source: "cli",
+          attempts: [{ source: "cli", status: "success" }],
+          state: { status: "stale", stale: true, refreshedAt: new Date(now - 500).toISOString(), sourcesTried: ["cli"] },
+          windows: [
+            { id: "gemini_5h", percentRemaining: 81, resetsAt: new Date(now + 4 * HOUR).toISOString() },
+            { id: "gemini_weekly", percentRemaining: 19, resetsAt: new Date(now + 120 * HOUR).toISOString() },
+            { id: "claude_gpt_5h", percentRemaining: 100, resetsAt: "1970-01-01T00:00:00.000Z" },
+          ],
+        },
+    ],
+  });
+  // Plain `--json` (quota-axi render.js quotaJsonReport) drops source, attempts and
+  // sourcesTried, and keeps state.refreshedAt only for a reused reading.
+  /** @param {any} report */
+  const compact = (report) => ({
+    ...report,
+    providers: report.providers.map((/** @type {any} */ p) => ({
+      ...p,
+      source: undefined,
+      attempts: undefined,
+      state: { ...p.state, refreshedAt: p.state.reused ? p.state.refreshedAt : undefined, sourcesTried: undefined },
+    })),
+  });
+  runtime.checking = false;
+  runtime.exec = async (cmd, args) => {
+    if (cmd === "quota-axi") {
+      const report = fullReport();
+      return { code: 0, stdout: JSON.stringify(args.includes("--full") ? report : compact(report)) };
+    }
+    return { code: 0, stdout: JSON.stringify({ accounts: [] }) };
+  };
+
+  const TokenViewer = await loadView("gemini-live-stale-view");
+  const view = new TokenViewer();
+  view.init({}, makeCx());
+  await flush();
+
+  const geminiLive = findById(view.render(), "usage-gemini");
+  assert.ok(geminiLive);
+  const liveTexts = texts(geminiLive);
+  assert.ok(liveTexts.includes("81%"), `expected 81% in ${JSON.stringify(liveTexts)}`);
+  assert.ok(!liveTexts.includes("old"), `did not expect 'old' in live Gemini row: ${JSON.stringify(liveTexts)}`);
+  assert.match(geminiLive.props.tooltip, /Read <1m ago\.$/);
+
+  view.close();
+
+  // Untimed cached fallback still shows 'old' in the rendered row.
+  untimed = true;
+  const TokenViewerUntimed = await loadView("gemini-untimed-stale-view");
+  const view2 = new TokenViewerUntimed();
+  view2.init({}, makeCx());
+  await flush();
+
+  const geminiStale = findById(view2.render(), "usage-gemini");
+  assert.ok(geminiStale);
+  const staleTexts = texts(geminiStale);
+  assert.ok(staleTexts.includes("old"), `expected 'old' in untimed stale Gemini row: ${JSON.stringify(staleTexts)}`);
+  assert.match(geminiStale.props.tooltip, /Read at an unknown time\.$/);
+
+  view2.close();
+});

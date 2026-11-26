@@ -36,12 +36,12 @@ live refresh can renew and save Codex login tokens:
 
 | Rows | Program | Notes |
 |---|---|---|
-| Claude, Fable, Gemini | `quota-axi --provider claude,agy --json --no-credential-refresh --max-age 60s` | [quota-axi](https://github.com/kunchenguid/quota-axi) asks Anthropic and Google with the sign-ins Claude Code and Antigravity (`agy`) keep on this machine. It is told not to renew a session, so an expired one shows as unavailable until its own CLI renews it. |
+| Claude, Fable, Gemini | `quota-axi --provider claude,agy --full --json --no-credential-refresh --max-age 60s` | [quota-axi](https://github.com/kunchenguid/quota-axi) asks Anthropic and Google with the sign-ins Claude Code and Antigravity (`agy`) keep on this machine. It is told not to renew a session, so an expired one shows as unavailable until its own CLI renews it. |
 | Codex | `codex-multi-auth limits --json --refresh` | Queries live limits for every Codex account about every 6 minutes. On the way it can renew and save an account's Codex login tokens. quota-axi sees only the one account Codex is signed in to. |
 
-No token, email address or account id is read by the mod, stored or shown, apart from the
-label codex-multi-auth already masks. Without one of the programs, its rows say
-`unavailable` and the rest still work.
+No token, email address or account id is kept, stored or shown by the mod, apart from the
+label codex-multi-auth already masks (any account fields included by `quota-axi --full --json`
+are ignored). Without one of the programs, its rows say `unavailable` and the rest still work.
 
 ## Add it
 

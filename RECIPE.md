@@ -78,14 +78,16 @@ limit of its own and its own row.
   no Herdr imports), `usage.js` (pure rules: reports to rows, rows to texts; no imports),
   `jsconfig.json` (`checkJs`, as Herdr writes it).
 - Programs, through `exec` with the person's own `PATH`:
-  - `quota-axi --provider claude,agy --json --no-credential-refresh --max-age 60s`. From
+  - `quota-axi --provider claude,agy --full --json --no-credential-refresh --max-age 60s`. From
     `providers[]`: `claude` windows `five_hour` and `seven_day` (Claude) and `model:fable`
     (Fable, weekly only), and `agy` windows `gemini_5h` and `gemini_weekly` (Gemini);
     each window's `percentRemaining` and `resetsAt`; `plan`; `state.status`; the reading's
-    time is `state.refreshedAt`, else for a `fresh` reading the report's `generatedAt`. Plain
-    `--json` drops `refreshedAt` unless the reading was reused, so a `stale` reading without
-    it is of unknown time and shows `old`. Other windows (agy's `claude_gpt_*` ones, for
-    example) are ignored.
+    time is `agy`'s `state.refreshedAt`, and `claude`'s only when `state.reused` (the time
+    plain `--json` would keep), else the report's `generatedAt` for a `fresh` reading. `--full`
+    keeps `agy`'s `refreshedAt` because quota-axi marks a live `agy` read `stale` when an
+    unrelated `claude_gpt_*` window reports an epoch reset; a cached fallback keeps its earlier
+    time. A `stale` reading without a time it may use is of unknown time and shows `old`.
+    Other windows (agy's `claude_gpt_*` ones, for example) are ignored.
   - `codex-multi-auth limits --json --refresh`. From `accounts[]`: `index`, `label`, `current`,
     `enabled`, and `quota`: `planType`, `updatedAt`, and in `primary` / `secondary` the
     window with `windowMinutes` 300 (5-hour) and 10080 (weekly): `usedPercent` (shown as
