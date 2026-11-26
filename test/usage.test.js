@@ -12,7 +12,7 @@ const NOW = Date.parse("2026-11-12T01:30:00Z");
 /** @param {unknown} report */
 const ran = (report, code = 0) => ({ code, stdout: JSON.stringify(report) });
 
-// Fictional reports shaped like `quota-axi --provider claude,agy --json`.
+// Fictional reports shaped like `quota-axi --provider claude,agy --full --json`.
 const quota = {
   schemaVersion: 5,
   generatedAt: "2026-11-12T01:30:00.000Z",
@@ -77,8 +77,7 @@ test("quotaRows takes a reused reading's own time, not the report's", () => {
 });
 
 test("quotaRows doesn't date a stale reading without its time as new", () => {
-  // Plain `quota-axi --json` drops state.refreshedAt unless the reading was reused, so a
-  // cached fallback after a failed read arrives as stale with no time of its own.
+  // An edge case: a stale reading that carries no time of its own.
   const report = structuredClone(quota);
   report.providers[0].state = { status: "stale", stale: true };
   const [claude] = quotaRows(ran(report));
@@ -110,24 +109,6 @@ test("quotaRows keeps a live agy reading current when quota-axi --full --json ma
   // Unaffected providers keep their readings and timestamps.
   assert.equal(claude.readAt, NOW);
   assert.equal(fable.readAt, NOW);
-});
-
-test("quotaRows falls back to generatedAt on stale only when positively proved a current live read", () => {
-  const report = structuredClone(quota);
-  report.providers[1] = {
-    provider: "agy",
-    source: "cli-rpc",
-    accountKeys: ["default"],
-    attempts: [{ source: "cli", status: "skipped", error: "agy CLI is not installed" }, { source: "loopback", status: "success" }],
-    state: { status: "stale", stale: true, sourcesTried: ["cli", "loopback"] },
-    windows: [
-      { id: "gemini_5h", kind: "session", percentRemaining: 81, resetsAt: "2026-11-12T05:14:32.000Z" },
-      { id: "gemini_weekly", kind: "weekly", percentRemaining: 19, resetsAt: "2026-11-17T01:53:10.000Z" },
-    ],
-  };
-  const [, , gemini] = quotaRows(ran(report));
-  assert.equal(gemini.readAt, NOW);
-  assert.equal(age(gemini, NOW, SOURCES.quota.staleMs), null);
 });
 
 test("quotaRows preserves cached age or unknown 'old' on failed, cached, or reused stale reads", () => {
@@ -182,6 +163,37 @@ test("quotaRows preserves cached age or unknown 'old' on failed, cached, or reus
   const [, , reusedGemini] = quotaRows(ran(untimedReused));
   assert.equal(reusedGemini.readAt, null);
   assert.equal(age(reusedGemini, NOW, SOURCES.quota.staleMs), "old");
+});
+
+test("quotaRows dates Claude and Fable as plain --json would, though --full keeps every refreshedAt", () => {
+  // quota-axi's `--json` (render.js quotaJsonReport) keeps state.refreshedAt only for a reused
+  // reading; `--full` keeps it always. Claude and Fable rows must read the same either way.
+  const fresh = structuredClone(quota);
+  fresh.providers[0].state = { status: "fresh", stale: false, refreshedAt: new Date(NOW - 5 * MIN).toISOString() };
+  const [freshClaude, freshFable] = quotaRows(ran(fresh));
+  assert.equal(freshClaude.readAt, NOW);
+  assert.equal(freshFable.readAt, NOW);
+
+  // A cached fallback after a failed oauth read, shaped like quota-axi's staleClaudeReport.
+  const fallback = structuredClone(quota);
+  Object.assign(fallback.providers[0], {
+    source: "cache",
+    attempts: [{ source: "oauth", status: "failed", error: "rate_limited" }],
+    state: {
+      status: "stale", stale: true, refreshedAt: new Date(NOW - 46 * MIN).toISOString(),
+      error: "rate_limited", sourcesTried: ["oauth", "cache"],
+    },
+  });
+  const [cachedClaude, cachedFable] = quotaRows(ran(fallback));
+  assert.equal(cachedClaude.readAt, null);
+  assert.equal(age(cachedClaude, NOW, SOURCES.quota.staleMs), "old");
+  assert.equal(cachedFable.readAt, null);
+
+  const reused = structuredClone(quota);
+  reused.providers[0].state = { status: "stale", stale: true, reused: true, refreshedAt: new Date(NOW - 46 * MIN).toISOString() };
+  const [reusedClaude] = quotaRows(ran(reused));
+  assert.equal(reusedClaude.readAt, NOW - 46 * MIN);
+  assert.equal(age(reusedClaude, NOW, SOURCES.quota.staleMs), "46m");
 });
 
 test("quotaRows says unavailable, with the reason, instead of guessing", () => {

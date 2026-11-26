@@ -81,13 +81,12 @@ limit of its own and its own row.
   - `quota-axi --provider claude,agy --full --json --no-credential-refresh --max-age 60s`. From
     `providers[]`: `claude` windows `five_hour` and `seven_day` (Claude) and `model:fable`
     (Fable, weekly only), and `agy` windows `gemini_5h` and `gemini_weekly` (Gemini);
-    each window's `percentRemaining` and `resetsAt`; `plan`; `state.status`; `source` and
-    `attempts`; the reading's time is `state.refreshedAt`, else the report's `generatedAt`
-    only for a `fresh` reading or a positively proven current non-cached successful read.
-    `--full --json` preserves `state.refreshedAt`, `source`, and `attempts` so a live `agy`
-    reading (which `quota-axi` marks `stale` when an unrelated `claude_gpt_*` window reports
-    an epoch reset) keeps its fetch time, and a cached fallback keeps its original
-    `refreshedAt`; a stale reading without a time or positive current-read proof shows `old`.
+    each window's `percentRemaining` and `resetsAt`; `plan`; `state.status`; the reading's
+    time is `agy`'s `state.refreshedAt`, and `claude`'s only when `state.reused` (the time
+    plain `--json` would keep), else the report's `generatedAt` for a `fresh` reading. `--full`
+    keeps `agy`'s `refreshedAt` because quota-axi marks a live `agy` read `stale` when an
+    unrelated `claude_gpt_*` window reports an epoch reset; a cached fallback keeps its earlier
+    time. A `stale` reading without a time it may use is of unknown time and shows `old`.
     Other windows (agy's `claude_gpt_*` ones, for example) are ignored.
   - `codex-multi-auth limits --json --refresh`. From `accounts[]`: `index`, `label`, `current`,
     `enabled`, and `quota`: `planType`, `updatedAt`, and in `primary` / `secondary` the

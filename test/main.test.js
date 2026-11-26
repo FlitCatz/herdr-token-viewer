@@ -347,65 +347,71 @@ test("view keeps the percentage when a Codex reading was taken after its reporte
 test("view omits 'old' on a current agy reading marked stale and keeps 'old' on an untimed stale fallback", async () => {
   const now = Date.now();
   const HOUR = 3600000;
-  /** @type {string[][]} */
-  const quotaCalls = [];
   let untimed = false;
+  // A full report shaped like quota-axi 0.1.69 `--full --json`: a live agy read is marked
+  // stale when an unrelated claude_gpt window reports an epoch reset.
+  const fullReport = () => ({
+    generatedAt: new Date(now).toISOString(),
+    providers: [
+      {
+        provider: "claude", plan: "max", source: "oauth",
+        attempts: [{ source: "oauth", status: "success" }],
+        state: { status: "fresh", stale: false, refreshedAt: new Date(now - 1000).toISOString(), sourcesTried: ["oauth"] },
+        windows: [
+          { id: "five_hour", percentRemaining: 84, resetsAt: new Date(now + 3 * HOUR).toISOString() },
+          { id: "seven_day", percentRemaining: 38, resetsAt: new Date(now + 30 * HOUR).toISOString() },
+          { id: "model:fable", percentRemaining: 77, resetsAt: new Date(now + 30 * HOUR).toISOString() },
+        ],
+      },
+      untimed
+        ? {
+          provider: "agy",
+          source: "cache",
+          attempts: [{ source: "cli", status: "failed", error: "timeout" }],
+          state: { status: "stale", stale: true, error: "timeout", sourcesTried: ["cli", "cache"] },
+          windows: [
+            { id: "gemini_5h", percentRemaining: 81, resetsAt: new Date(now + 4 * HOUR).toISOString() },
+            { id: "gemini_weekly", percentRemaining: 19, resetsAt: new Date(now + 120 * HOUR).toISOString() },
+          ],
+        }
+        : {
+          provider: "agy",
+          source: "cli",
+          attempts: [{ source: "cli", status: "success" }],
+          state: { status: "stale", stale: true, refreshedAt: new Date(now - 500).toISOString(), sourcesTried: ["cli"] },
+          windows: [
+            { id: "gemini_5h", percentRemaining: 81, resetsAt: new Date(now + 4 * HOUR).toISOString() },
+            { id: "gemini_weekly", percentRemaining: 19, resetsAt: new Date(now + 120 * HOUR).toISOString() },
+            { id: "claude_gpt_5h", percentRemaining: 100, resetsAt: "1970-01-01T00:00:00.000Z" },
+          ],
+        },
+    ],
+  });
+  // Plain `--json` (quota-axi render.js quotaJsonReport) drops source, attempts and
+  // sourcesTried, and keeps state.refreshedAt only for a reused reading.
+  /** @param {any} report */
+  const compact = (report) => ({
+    ...report,
+    providers: report.providers.map((/** @type {any} */ p) => ({
+      ...p,
+      source: undefined,
+      attempts: undefined,
+      state: { ...p.state, refreshedAt: p.state.reused ? p.state.refreshedAt : undefined, sourcesTried: undefined },
+    })),
+  });
   runtime.checking = false;
   runtime.exec = async (cmd, args) => {
     if (cmd === "quota-axi") {
-      quotaCalls.push(args);
-      return {
-        code: 0,
-        stdout: JSON.stringify({
-          generatedAt: new Date(now).toISOString(),
-          providers: [
-            {
-              provider: "claude", plan: "max", source: "oauth",
-              state: { status: "fresh", stale: false, refreshedAt: new Date(now - 1000).toISOString() },
-              windows: [
-                { id: "five_hour", percentRemaining: 84, resetsAt: new Date(now + 3 * HOUR).toISOString() },
-                { id: "seven_day", percentRemaining: 38, resetsAt: new Date(now + 30 * HOUR).toISOString() },
-                { id: "model:fable", percentRemaining: 77, resetsAt: new Date(now + 30 * HOUR).toISOString() },
-              ],
-            },
-            untimed
-              ? {
-                provider: "agy",
-                source: "cache",
-                attempts: [{ source: "cli", status: "failed", error: "timeout" }],
-                state: { status: "stale", stale: true, error: "timeout", sourcesTried: ["cli", "cache"] },
-                windows: [
-                  { id: "gemini_5h", percentRemaining: 81, resetsAt: new Date(now + 4 * HOUR).toISOString() },
-                  { id: "gemini_weekly", percentRemaining: 19, resetsAt: new Date(now + 120 * HOUR).toISOString() },
-                ],
-              }
-              : {
-                provider: "agy",
-                source: "cli",
-                attempts: [{ source: "cli", status: "success" }],
-                state: { status: "stale", stale: true, refreshedAt: new Date(now - 500).toISOString(), sourcesTried: ["cli"] },
-                windows: [
-                  { id: "gemini_5h", percentRemaining: 81, resetsAt: new Date(now + 4 * HOUR).toISOString() },
-                  { id: "gemini_weekly", percentRemaining: 19, resetsAt: new Date(now + 120 * HOUR).toISOString() },
-                  { id: "claude_gpt_5h", percentRemaining: 100, resetsAt: "1970-01-01T00:00:00.000Z" },
-                ],
-              },
-          ],
-        }),
-      };
+      const report = fullReport();
+      return { code: 0, stdout: JSON.stringify(args.includes("--full") ? report : compact(report)) };
     }
     return { code: 0, stdout: JSON.stringify({ accounts: [] }) };
   };
 
   const TokenViewer = await loadView("gemini-live-stale-view");
-  const cx = makeCx();
   const view = new TokenViewer();
-  view.init({}, cx);
+  view.init({}, makeCx());
   await flush();
-
-  assert.ok(quotaCalls.length >= 1);
-  assert.ok(quotaCalls[0].includes("--full"));
-  assert.ok(quotaCalls[0].includes("--json"));
 
   const geminiLive = findById(view.render(), "usage-gemini");
   assert.ok(geminiLive);
