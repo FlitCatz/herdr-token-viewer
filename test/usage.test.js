@@ -77,7 +77,7 @@ test("quotaRows takes a reused reading's own time, not the report's", () => {
 });
 
 test("quotaRows doesn't date a stale reading without its time as new", () => {
-  // An edge case: a stale reading that carries no time of its own.
+  // An edge case: a stale reading whose state carries no refreshedAt of its own.
   const report = structuredClone(quota);
   report.providers[0].state = { status: "stale", stale: true };
   const [claude] = quotaRows(ran(report));
@@ -134,12 +134,11 @@ test("quotaRows preserves cached age or unknown 'old' on failed, cached, or reus
   assert.equal(age(cachedGemini, NOW, SOURCES.quota.staleMs), "46m");
   assert.match(tip(cachedGemini, NOW), /Read 46m ago\.$/);
 
-  // Untimed cached fallback stays "old" even if a helper attempt (e.g. credential refresh) succeeded.
+  // An untimed cached Claude fallback stays "old".
   const untimedCached = structuredClone(quota);
   untimedCached.providers[0] = {
     provider: "claude",
     source: "cache",
-    attempts: [{ source: "claude-cli-refresh", status: "success" }, { source: "oauth-profile", status: "failed", error: "rate_limited" }],
     state: { status: "stale", stale: true, error: "rate_limited", sourcesTried: ["oauth-profile", "cache"] },
     windows: [
       { id: "five_hour", kind: "session", percentRemaining: 84, resetsAt: "2026-11-12T05:10:00.000Z" },
@@ -149,12 +148,11 @@ test("quotaRows preserves cached age or unknown 'old' on failed, cached, or reus
   assert.equal(untimedClaude.readAt, null);
   assert.equal(age(untimedClaude, NOW, SOURCES.quota.staleMs), "old");
 
-  // Reused stale reading without refreshedAt never falls back to generatedAt.
+  // A defensive edge case quota-axi does not normally print: a reused stale reading without
+  // refreshedAt never falls back to generatedAt.
   const untimedReused = structuredClone(quota);
   untimedReused.providers[1] = {
     provider: "agy",
-    source: "cli",
-    attempts: [{ source: "cli", status: "success" }],
     state: { status: "stale", stale: true, reused: true },
     windows: [
       { id: "gemini_5h", kind: "session", percentRemaining: 81, resetsAt: "2026-11-12T05:14:32.000Z" },
